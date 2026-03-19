@@ -91,8 +91,9 @@ namespace Ficedula.FF7 {
         }
         public Stream Open(string name) {
             var s = TryOpen(name);
-            if (s == null)
-                throw new FFException($"LGP file {name} not found");
+            if (s == null) {
+                throw new FFException($"\x1b[31mLGP file {name} not found\x1b[0m");
+            }
             return s;
         }
 

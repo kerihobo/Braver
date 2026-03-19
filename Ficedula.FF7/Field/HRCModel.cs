@@ -46,7 +46,7 @@ namespace Ficedula.FF7.Field {
 
         public HRCModel(Func<string, Stream> dataProvider, string hrcFile) {
             using (var hrc = dataProvider(hrcFile)) {
-                var lines = hrc.ReadAllLines().ToArray();
+                string[] lines = hrc.ReadAllLines().ToArray();
                 Name = lines[1].Split(null).Last();
                 int numBones = int.Parse(lines[2].Split(null).Last());
                 Dictionary<string, Bone> bones = new Dictionary<string, Bone>(StringComparer.InvariantCultureIgnoreCase);
@@ -57,11 +57,32 @@ namespace Ficedula.FF7.Field {
                 Root = new Bone(0, -1, "root");
                 bones.Add("root", Root);
 
+                bool isNUp = false;
+                int n = 0;
+                lines = lines.Where(s => !s.StartsWith("#")).ToArray();
+
+
+                //Console.WriteLine(string.Join("\n", lines));
                 foreach (int b in Enumerable.Range(0, numBones)) {
-                    Bone bone = new Bone(float.Parse(lines[6 + 5 * b]), b, lines[4 + 5 * b]);
-                    foreach (string rsd in lines[7 + 5 * b].Split(null).Skip(1)) {
+                    //float length = 0;
+                    //float.TryParse(lines[6 + 5 * b], out length);
+                    float length = float.Parse(lines[6 + n + (5 * b)]);
+
+                    string boneName = lines[4 + n + (5 * b)];
+                    Bone bone = new Bone(length, b, boneName);
+
+                    string targetLine = lines[7 + n + (5 * b)];
+                    //Console.WriteLine("Here we go! " + targetLine);
+                    if (targetLine.Length > 0 && targetLine[0] == '#') {
+                        targetLine = lines[8 + (5 * b)];
+                        isNUp = true;
+                    }
+
+                    foreach (string rsd in targetLine.Split(null).Skip(1)) {
                         if (string.IsNullOrWhiteSpace(rsd)) continue;
-                        var rsdLines = dataProvider(rsd + ".RSD").ReadAllLines().ToArray();
+
+                        //Console.WriteLine("RSD: " + rsd);
+                        string[] rsdLines = dataProvider(rsd + ".RSD").ReadAllLines().ToArray();
                         string pFile = rsdLines
                             .First(s => s.StartsWith("PLY=", StringComparison.InvariantCultureIgnoreCase))
                             .Substring(4)
@@ -79,8 +100,18 @@ namespace Ficedula.FF7.Field {
                         );
                         bone.Polygons.Add(bp);
                     }
-                    bones.Add(lines[4 + 5 * b], bone);
-                    bones[lines[5 + 5 * b]].Children.Add(bone);
+                    bones.Add(lines[4 + n + (5 * b)], bone);
+                    
+                    string key = lines[5 + n + (5 * b)];
+                    //Console.WriteLine("bone: " + key);
+                    if (bones.ContainsKey(key)) {
+                        bones[key].Children.Add(bone);
+                    }
+
+                    if (isNUp) {
+                        //n++;
+                    }
+
                     Bones.Add(bone);
                 }
             }

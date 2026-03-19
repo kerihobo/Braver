@@ -5,14 +5,8 @@
 //  SPDX-License-Identifier: EPL-2.0
 
 using Ficedula.FF7.Field;
-using SharpGLTF.Geometry;
-using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
-using SharpGLTF.Schema2;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 
 namespace Ficedula.FF7.Exporters {
@@ -26,7 +20,6 @@ namespace Ficedula.FF7.Exporters {
 
         public SharpGLTF.Schema2.ModelRoot BuildScene(string modelHRC, IEnumerable<string> animFiles) {
             var scene = new SceneBuilder();
-
             var model = new Field.HRCModel(_data.Open, modelHRC);
             var animations = animFiles
                 .Select(file => new { Anim = new Field.FieldAnim(_data.Open(file)), Name = Path.GetFileNameWithoutExtension(file) })
@@ -88,17 +81,25 @@ namespace Ficedula.FF7.Exporters {
 
             FinishBaking();
 
-            var settings = SceneBuilderSchema2Settings.Default;
+            SceneBuilderSchema2Settings settings = SceneBuilderSchema2Settings.Default;
             settings.UseStridedBuffers = false;
-            var output = scene.ToGltf2(settings);
-
+            SharpGLTF.Schema2.ModelRoot output = scene.ToGltf2(settings);
+            //Console.WriteLine($"Anim names ({animations.Count}): {string.Join(" ", animations.Select(x => x.Name).ToArray())}");
+            //Console.WriteLine($"Nodes ({output.LogicalNodes.Count}): {string.Join(", ", output.LogicalNodes.Select(x => x.Name).ToArray())}");
 
             foreach (var anim in animations) {
+                //Console.WriteLine($"Processing animation: {anim.Name}");
 
-                var mAnim = output.CreateAnimation();
+                SharpGLTF.Schema2.Animation mAnim = output.CreateAnimation();
                 mAnim.Name = anim.Name;
+                
+                bool isNaNFound = false;
 
                 foreach (var node in output.LogicalNodes) {
+                    //if (node.Name == "null" || string.IsNullOrWhiteSpace(node.Name)) {
+                    //    Console.WriteLine("Skipping: " + node.Name);
+                    //    continue;
+                    //}
                     int c = 0;
                     int boneIndex;
                     if (sourceNodes.TryGetValue(node.Name ?? "", out var bone))
@@ -119,12 +120,14 @@ namespace Ficedula.FF7.Exporters {
                                 frame.Rotation.X * (float)Math.PI / 180,
                                 (180 + frame.Rotation.Z) * (float)Math.PI / 180
                             );
-                        } else {
+                        } else if (/*anim.Anim.BoneCount > 0 && */boneIndex < anim.Anim.BoneCount) {
                             rotation = Quaternion.CreateFromYawPitchRoll(
                                 frame.Bones[boneIndex].Y * (float)Math.PI / 180,
                                 frame.Bones[boneIndex].X * (float)Math.PI / 180,
                                 frame.Bones[boneIndex].Z * (float)Math.PI / 180
                             );
+                        } else {
+                            rotation = Quaternion.Identity;
                         }
                         rots[c / 15f] = rotation;
 
@@ -133,6 +136,20 @@ namespace Ficedula.FF7.Exporters {
 
                     if (node.VisualRoot == node)
                         mAnim.CreateTranslationChannel(node, trans);
+
+                    foreach (var kvp in rots.ToList()) {
+                        Quaternion q = kvp.Value;
+
+                        if (float.IsNaN(q.X) || float.IsNaN(q.Y) || float.IsNaN(q.Z) || float.IsNaN(q.W)) {
+                            if (!isNaNFound) {
+                                isNaNFound = true;
+                                Console.WriteLine($"{anim.Name} Error: rots contains NaN values.");
+                            }
+                            //Console.WriteLine($"NaN found in rots at time {kvp.Key}: ({q.X}, {q.Y}, {q.Z}, {q.W}) - Replacing with default.");
+                            rots[kvp.Key] = Quaternion.Identity;
+                        }
+                    }
+
                     mAnim.CreateRotationChannel(node, rots);
                 }
             }

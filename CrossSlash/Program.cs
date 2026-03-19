@@ -14,7 +14,7 @@ System.Globalization.CultureInfo.CurrentCulture =
     System.Globalization.CultureInfo.DefaultThreadCurrentCulture =
     System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
 
-Console.WriteLine("CrossSlash");
+//Console.WriteLine("CrossSlash");
 
 switch (args.Length) {
     case 0:
@@ -34,7 +34,7 @@ switch (args.Length) {
 
     default:
         exporter = ExportKind.Exporters[args[0]];
-        Console.WriteLine($"Opening source {args[1]}...");
+        //Console.WriteLine($"Opening source {args[1]}...");
         var source = DataSource.Create(args[1]);
         string dest = args[2];
         var options = args.Skip(2)

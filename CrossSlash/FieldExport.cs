@@ -31,9 +31,21 @@ namespace CrossSlash {
 
         public override void Execute(DataSource source, string dest, IEnumerable<string> parameters) {
             var exporter = new FieldModel(source, _config);
-            Console.WriteLine($"Exporting model {parameters.First()}...");
+            const string cyan = "\x1b[36m";
+            const string white = "\x1b[37m";
+            const string yellow = "\x1b[33m";
+            const string reset = "\x1b[0m";
+
+            Console.Write($"Exporting model ");
+            Console.Write($"{cyan}{parameters.First()} {white}-> ");
+            Console.WriteLine($"{yellow}{dest}{reset}");
+
+            //foreach (var item in parameters) {
+            //    System.Diagnostics.Debug.WriteLine(item);
+            //}
+
             var model = exporter.BuildScene(parameters.First(), parameters.Skip(1));
-            Console.WriteLine($"Saving output to {dest}...");
+            //Console.WriteLine($"Saving output to {dest}...");
             model.SaveGLB(dest);
         }
 
@@ -149,7 +161,12 @@ namespace CrossSlash {
                     BakeVertexColours = _chkBakeColours.Checked,
                 };
                 var exporter = new FieldModel(_source, options);
+                foreach (var item in anims) {
+                    System.Diagnostics.Debug.WriteLine(item);
+                }
                 var model = exporter.BuildScene(_hrcFiles[_lvHRCs.SelectedItem], anims);
+                System.Diagnostics.Debug.WriteLine("WHAT");
+
                 model.SaveGLB(_glbFile);
 
                 MessageBox.Query("Success", "Export Succeeded", "OK");
