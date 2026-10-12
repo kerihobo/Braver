@@ -99,7 +99,9 @@ namespace CrossSlash {
             };
             btnExport.Clicked += BtnExport_Clicked;
 
-            Add(lblSounds, _txtSounds, btnDest, btnExport);
+            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(btnExport) + 1);
+
+            Add(lblSounds, _txtSounds, btnDest, btnExport, btnBack);
 
         }
 

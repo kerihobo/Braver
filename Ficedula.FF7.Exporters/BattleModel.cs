@@ -220,6 +220,8 @@ namespace Ficedula.FF7.Exporters {
         public SharpGLTF.Schema2.ModelRoot BuildSceneAuto(string name) {
             if (_source.Exists(name + ".a00"))
                 return BuildSceneFromSummon(name);
+            else if (IsBattleLocation(_source, name))
+                return BuildSceneFromBattleLocation(name);
             else if (_source.Exists(name + "DA"))
                 return BuildSceneFromModel(name);
             else
@@ -241,6 +243,104 @@ namespace Ficedula.FF7.Exporters {
                 return data;
             };
             return BuildScene(summonName + ".d", summonName + ".a00", texs, NextData);
+        }
+
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromBattleLocation(string locationCode) {
+            locationCode = NormalizeBattleLocationCode(locationCode);
+
+            (int skeletonType, int boneCount, int jointCount, int textureCount) header;
+            using (var skeleton = _source.Open(locationCode + "aa"))
+                header = ReadBattleSkeletonHeader(skeleton);
+
+            if (header.skeletonType != 1 || header.boneCount != 0)
+                throw new InvalidDataException($"{locationCode}aa is not a battle location skeleton.");
+            if (header.jointCount <= 0)
+                throw new InvalidDataException($"{locationCode}aa does not define any location parts.");
+            if (header.textureCount < 0)
+                throw new InvalidDataException($"{locationCode}aa has an invalid texture count.");
+
+            var textureSlots = Enumerable.Range(0, Math.Min(header.textureCount, 10))
+                .Select(index => {
+                    string textureName = $"{locationCode}a{(char)('c' + index)}";
+                    using (var stream = _source.TryOpen(textureName))
+                        return stream == null ? null : new Ficedula.FF7.TexFile(stream);
+                })
+                .ToArray();
+            var materials = ConvertTextures(textureSlots.OfType<Ficedula.FF7.TexFile>());
+            MaterialBuilder defaultMaterial = GetUntexturedMaterial();
+            var orderedMaterials = textureSlots
+                .Select(texture => texture == null ? defaultMaterial : materials[texture])
+                .ToList();
+
+            var scene = new SceneBuilder();
+            var root = new NodeBuilder(locationCode.ToUpperInvariant());
+            root.LocalTransform = SharpGLTF.Transforms.AffineTransform.CreateFromAny(
+                null,
+                new Vector3(Options.Scale),
+                Quaternion.CreateFromAxisAngle(Vector3.UnitX, (float)Math.PI),
+                Vector3.Zero
+            );
+
+            for (int partIndex = 0; partIndex < header.jointCount; partIndex++) {
+                string partName = GetBattleLocationPartName(locationCode, partIndex);
+                using var stream = _source.TryOpen(partName);
+                if (stream == null)
+                    throw new InvalidDataException($"Battle location {locationCode} is missing part {partName}.");
+
+                var partNode = root.CreateNode(partName.ToUpperInvariant());
+                var part = new PFile(stream);
+                foreach (var mesh in BuildMeshes(part, orderedMaterials, defaultMaterial, 0))
+                    scene.AddRigidMesh(mesh, partNode);
+            }
+
+            scene.AddNode(root);
+            FinishBaking();
+
+            var settings = SceneBuilderSchema2Settings.Default;
+            settings.UseStridedBuffers = false;
+            return scene.ToGltf2(settings);
+        }
+
+        public static bool IsBattleLocation(DataSource source, string locationCode) {
+            try {
+                locationCode = NormalizeBattleLocationCode(locationCode);
+                using var skeleton = source.TryOpen(locationCode + "aa");
+                if (skeleton == null)
+                    return false;
+
+                var header = ReadBattleSkeletonHeader(skeleton);
+                return header.skeletonType == 1 && header.boneCount == 0;
+            } catch {
+                return false;
+            }
+        }
+
+        public static string NormalizeBattleLocationCode(string locationCode) {
+            string code = Path.GetFileNameWithoutExtension(locationCode.Trim());
+            if (code.Length == 4 && code.EndsWith("aa", StringComparison.OrdinalIgnoreCase))
+                code = code[..2];
+            if (code.Length != 2)
+                throw new ArgumentException("Enter a two-letter battlefield code or its skeleton filename, such as px or pxaa.");
+            return code;
+        }
+
+        private static (int skeletonType, int boneCount, int jointCount, int textureCount) ReadBattleSkeletonHeader(Stream skeleton) {
+            if (skeleton.Length < 52)
+                throw new InvalidDataException("Battle skeleton header is incomplete.");
+
+            skeleton.Position = 0;
+            int skeletonType = skeleton.ReadI32();
+            skeleton.Position = 12;
+            int boneCount = skeleton.ReadI32();
+            skeleton.Position = 20;
+            int jointCount = skeleton.ReadI32();
+            int textureCount = skeleton.ReadI32();
+            return (skeletonType, boneCount, jointCount, textureCount);
+        }
+
+        private static string GetBattleLocationPartName(string locationCode, int partIndex) {
+            int suffixIndex = partIndex + 12;
+            return locationCode + (char)('a' + suffixIndex / 26) + (char)('a' + suffixIndex % 26);
         }
 
         public SharpGLTF.Schema2.ModelRoot BuildSceneFromModel(string modelCode) {

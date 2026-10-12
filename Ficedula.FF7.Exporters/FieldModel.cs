@@ -5,6 +5,7 @@
 //  SPDX-License-Identifier: EPL-2.0
 
 using Ficedula.FF7.Field;
+using Ficedula;
 using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
 using System.Numerics;
@@ -19,11 +20,29 @@ namespace Ficedula.FF7.Exporters {
         }
 
         public SharpGLTF.Schema2.ModelRoot BuildScene(string modelHRC, IEnumerable<string> animFiles) {
+            return BuildScene(modelHRC, animFiles, false, out _);
+        }
+
+        public SharpGLTF.Schema2.ModelRoot BuildScene(
+            string modelHRC,
+            IEnumerable<string> animFiles,
+            bool compatibleAnimationsOnly,
+            out IReadOnlyList<string> usedAnimations) {
             var scene = new SceneBuilder();
             var model = new Field.HRCModel(_data.Open, modelHRC);
-            var animations = animFiles
+            var animationFiles = animFiles.ToList();
+            if (compatibleAnimationsOnly) {
+                animationFiles = animationFiles
+                    .Where(file => HasCompatibleSkeleton(file, model.Bones.Count))
+                    .ToList();
+            }
+
+            var animations = animationFiles
                 .Select(file => new { Anim = new Field.FieldAnim(_data.Open(file)), Name = Path.GetFileNameWithoutExtension(file) })
                 .ToList();
+            if (!compatibleAnimationsOnly && (animations.Count == 0 || animations.Any(anim => anim.Anim.Frames.Count == 0)))
+                throw new InvalidDataException("At least one field animation with frames is required.");
+            usedAnimations = animations.Select(anim => anim.Name).ToList();
 
             var materials = ConvertTextures(
                 model.Bones
@@ -32,17 +51,19 @@ namespace Ficedula.FF7.Exporters {
             );
             MaterialBuilder defMaterial = GetUntexturedMaterial();
 
-            var firstFrame = animations[0].Anim.Frames[0];
+            var firstFrame = animations.FirstOrDefault()?.Anim.Frames.FirstOrDefault();
             var allNodes = new Dictionary<string, NodeBuilder>();
             var sourceNodes = new Dictionary<string, HRCModel.Bone>();
 
             void Descend(SceneBuilder scene, HRCModel.Bone bone, NodeBuilder node, Vector3 translation, Vector3? scale) {
                 sourceNodes[bone.Name] = bone;
-                var rotation = Quaternion.CreateFromYawPitchRoll(
-                    firstFrame.Rotation.Y * (float)Math.PI / 180,
-                    firstFrame.Rotation.X * (float)Math.PI / 180,
-                    firstFrame.Rotation.Z * (float)Math.PI / 180
-                );
+                var rotation = firstFrame == null
+                    ? Quaternion.Identity
+                    : Quaternion.CreateFromYawPitchRoll(
+                        firstFrame.Rotation.Y * (float)Math.PI / 180,
+                        firstFrame.Rotation.X * (float)Math.PI / 180,
+                        firstFrame.Rotation.Z * (float)Math.PI / 180
+                    );
 
                 node.LocalTransform = SharpGLTF.Transforms.AffineTransform.CreateFromAny(
                     null, scale ?? Vector3.One, rotation, translation
@@ -155,6 +176,18 @@ namespace Ficedula.FF7.Exporters {
             }
 
             return output;
+        }
+
+        private bool HasCompatibleSkeleton(string animationFile, int modelBoneCount) {
+            try {
+                using var stream = _data.Open(animationFile);
+                int version = stream.ReadI32();
+                int frameCount = stream.ReadI32();
+                int animationBoneCount = stream.ReadI32();
+                return version == 1 && frameCount > 0 && animationBoneCount == modelBoneCount;
+            } catch {
+                return false;
+            }
         }
     }
 }

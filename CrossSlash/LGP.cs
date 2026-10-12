@@ -107,7 +107,9 @@ namespace CrossSlash {
             };
             bExtract.Clicked += BExtract_Clicked;
 
-            Add(_lvFiles, bDest, bExtract);
+            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(bExtract) + 1);
+
+            Add(_lvFiles, bDest, bExtract, btnBack);
         }
 
         private void BExtract_Clicked() {

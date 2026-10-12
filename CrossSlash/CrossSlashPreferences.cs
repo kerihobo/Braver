@@ -9,8 +9,19 @@ using System.Text.Json;
 namespace CrossSlash {
     internal sealed class CrossSlashPreferences {
         public string? DefaultSourcePath { get; set; }
+        public Dictionary<string, string> ExporterSourcePaths { get; set; } = new(StringComparer.InvariantCultureIgnoreCase);
         public string? LastOutputDirectory { get; set; }
         public string? LastExtractDirectory { get; set; }
+
+        public string? GetExporterSourcePath(string exporterKey) {
+            ExporterSourcePaths ??= new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+            return ExporterSourcePaths.TryGetValue(exporterKey, out string? path) ? path : DefaultSourcePath;
+        }
+
+        public void RememberExporterSourcePath(string exporterKey, string path) {
+            ExporterSourcePaths ??= new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
+            ExporterSourcePaths[exporterKey] = path;
+        }
     }
 
     internal static class PreferencesStore {
@@ -44,6 +55,16 @@ namespace CrossSlash {
             try {
                 var preferences = Load();
                 preferences.LastOutputDirectory = Path.GetDirectoryName(path);
+                Save(preferences);
+            } catch {
+                // A failure to remember a dialog location should not interrupt an export.
+            }
+        }
+
+        public static void RememberOutputDirectory(string path) {
+            try {
+                var preferences = Load();
+                preferences.LastOutputDirectory = path;
                 Save(preferences);
             } catch {
                 // A failure to remember a dialog location should not interrupt an export.
