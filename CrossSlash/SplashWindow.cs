@@ -6,19 +6,18 @@
 
 using Ficedula.FF7.Exporters;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Terminal.Gui;
 
 namespace CrossSlash {
     public class SplashWindow : Window {
 
         private Label _lblLGP;
-        private DataSource _source;
+        private DataSource? _source;
+        private CrossSlashPreferences _preferences;
 
         public SplashWindow() {
+            _preferences = PreferencesStore.Load();
 
             Title = "CrossSlash FF7 exporter";
 
@@ -35,12 +34,20 @@ namespace CrossSlash {
             };
             btnFolder.Clicked += () => DoOpen(false);
 
-            _lblLGP = new Label {
-                Text = "(No source selected)",
+            var btnPreferences = new Button {
+                Text = "Preferences...",
+                Width = Dim.Percent(25),
                 X = Pos.Right(btnFolder) + 1,
             };
+            btnPreferences.Clicked += OpenPreferences;
 
-            Add(btnLGP, btnFolder, _lblLGP);
+            _lblLGP = new Label {
+                Text = "(No source selected)",
+                Y = Pos.Bottom(btnPreferences) + 1,
+                Width = Dim.Fill(1),
+            };
+
+            Add(btnLGP, btnFolder, btnPreferences, _lblLGP);
 
             Pos y = Pos.Bottom(_lblLGP) + 2;
 
@@ -62,28 +69,62 @@ namespace CrossSlash {
                 Add(b);
             }
 
+            if (!string.IsNullOrWhiteSpace(_preferences.DefaultSourcePath))
+                TrySelectSource(_preferences.DefaultSourcePath, showError: false);
         }
 
         private void DoOpen(bool lgp) {
-            OpenDialog d;
-            if (lgp)
-                d = new OpenDialog(
-                    "Open LGP", "Choose the LGP file to read data from",
-                    new List<string> { ".lgp" }
-                );
-            else
-                d = new OpenDialog(
-                    "Open Folder", "Choose the folder to read data from",
-                    openMode: OpenDialog.OpenMode.Directory
-                );
-            Application.Run(d);
-            if (!d.Canceled && d.FilePaths.Any()) {
-                try {
-                    _source = DataSource.Create(d.FilePaths[0]);
-                } catch (Exception ex) {
+            string? path = lgp
+                ? NativeFilePicker.OpenLgp(_preferences.DefaultSourcePath)
+                : NativeFilePicker.OpenFolder("Choose the folder to read data from", _preferences.DefaultSourcePath);
+            if (path != null)
+                TrySelectSource(path, showError: true);
+        }
+
+        private void OpenPreferences() {
+            var dialog = new PreferencesWindow(_preferences.DefaultSourcePath);
+            Application.Run(dialog);
+            if (!dialog.Saved)
+                return;
+
+            string? path = dialog.DefaultSourcePath;
+            if (string.IsNullOrWhiteSpace(path)) {
+                if (_source is IDisposable disposable)
+                    disposable.Dispose();
+                _source = null;
+                _lblLGP.Text = "(No source selected)";
+                _preferences.DefaultSourcePath = null;
+                SavePreferences();
+            } else {
+                TrySelectSource(path, showError: true);
+            }
+        }
+
+        private void TrySelectSource(string path, bool showError) {
+            DataSource source;
+            try {
+                source = DataSource.Create(path);
+            } catch (Exception ex) {
+                if (showError)
                     MessageBox.ErrorQuery("Error", ex.Message, "OK");
-                }
-                _lblLGP.Text = d.FilePaths[0];
+                else
+                    _lblLGP.Text = $"Saved source could not be opened: {path}";
+                return;
+            }
+
+            if (_source is IDisposable disposable)
+                disposable.Dispose();
+            _source = source;
+            _lblLGP.Text = path;
+            _preferences.DefaultSourcePath = path;
+            SavePreferences();
+        }
+
+        private void SavePreferences() {
+            try {
+                PreferencesStore.Save(_preferences);
+            } catch (Exception ex) {
+                MessageBox.ErrorQuery("Preferences", $"Could not save preferences: {ex.Message}", "OK");
             }
         }
 

@@ -6,7 +6,6 @@
 
 using Ficedula.FF7.Exporters;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Terminal.Gui;
@@ -116,13 +115,13 @@ namespace CrossSlash {
         }
 
         private void BtnGLB_Clicked() {
-            var d = new SaveDialog(
-                "Save As", "Save output model to which file",
-                new List<string> { ".glb" }
+            var preferences = PreferencesStore.Load();
+            string? path = NativeFilePicker.SaveGlb(
+                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath ?? _glbFile
             );
-            Application.Run(d);
-            if (!d.Canceled && d.FileName != null) {
-                _lblGLB.Text = _glbFile = (string)d.FilePath;
+            if (path != null) {
+                _lblGLB.Text = _glbFile = path;
+                PreferencesStore.RememberOutputPath(path);
             }
         }
 

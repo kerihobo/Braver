@@ -6,10 +6,7 @@
 
 using Ficedula.FF7.Exporters;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Terminal.Gui;
 
 namespace CrossSlash {
@@ -83,14 +80,15 @@ namespace CrossSlash {
                 Width = Dim.Fill(5),
             };
             btnDest.Clicked += () => {
-                var d = new OpenDialog(
-                    "Open Folder", "Choose the folder to extract to",
-                    openMode: OpenDialog.OpenMode.Directory
+                var preferences = PreferencesStore.Load();
+                string? path = NativeFilePicker.OpenFolder(
+                    "Choose the folder to extract to",
+                    preferences.LastExtractDirectory ?? preferences.DefaultSourcePath
                 );
-                Application.Run(d);
-                if (!d.Canceled && d.FilePaths.Any()) {
-                    _dest = d.FilePaths[0];
+                if (path != null) {
+                    _dest = path;
                     btnDest.Text = "Extract to " + _dest;
+                    PreferencesStore.RememberExtractDirectory(path);
                 }
             };
 
