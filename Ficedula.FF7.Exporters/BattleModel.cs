@@ -81,7 +81,7 @@ namespace Ficedula.FF7.Exporters {
             void Descend(SceneBuilder scene, BBone bone, NodeBuilder node, Vector3 translation, Vector3? scale) {
                 var boneRotation = bone == weaponBone && firstWeaponFrame != null
                     ? firstWeaponFrame.Rotations[0]
-                    : bone.Index >= 0 && bone.Index < bodyBoneCount
+                    : bone.Index >= 0 && bone.Index < bodyBoneCount && bone.Index + 1 < firstFrame.Rotations.Length
                         ? firstFrame.Rotations[bone.Index + 1]
                         : default;
                 var rotation = Quaternion.CreateFromYawPitchRoll(
