@@ -1,4 +1,4 @@
-﻿// This program and the accompanying materials are made available under the terms of the
+// This program and the accompanying materials are made available under the terms of the
 //  Eclipse Public License v2.0 which accompanies this distribution, and is available at
 //  https://www.eclipse.org/legal/epl-v20.html
 //  
@@ -31,7 +31,7 @@ namespace Ficedula.FF7.Exporters {
             _options = options;
         }
 
-        private SharpGLTF.Schema2.ModelRoot BuildScene(string skeleton, string anims, IEnumerable<string> texs, Func<string?> nextFile, IEnumerable<PFile>? extraParts = null) {
+        private SharpGLTF.Schema2.ModelRoot BuildScene(string skeleton, string anims, IEnumerable<string> texs, Func<string?> nextFile, IReadOnlyList<(string Name, PFile Model)>? weaponParts = null, int bodyAnimationCount = 0, int weaponAnimationCount = 0) {
             var scene = new SceneBuilder();
 
             Animations animations;
@@ -40,6 +40,9 @@ namespace Ficedula.FF7.Exporters {
             BBone rootBone;
             using(var s = _source.Open(skeleton))
                 rootBone = BBone.Decode(s);
+
+            int bodyBoneCount = rootBone.ThisAndDescendants().Count(b => b.Index >= 0);
+            BBone? weaponBone = null;
 
             var textures = texs
                 .Select(t => {
@@ -61,18 +64,30 @@ namespace Ficedula.FF7.Exporters {
                     pFiles[bone.PFileIndex.Value] = new PFile(s);
             }
 
+            if (weaponParts?.Count > 0) {
+                weaponBone = new BBone { Index = bodyBoneCount };
+                rootBone.Children.Add(weaponBone);
+            }
+
             var firstFrame = animations.Anims[0].Frames[0];
 
-            int maxBone = 0;
             var allNodes = new Dictionary<int, NodeBuilder>();
+            NodeBuilder? weaponNode = null;
+
+            Frame? firstWeaponFrame = weaponAnimationCount > 0 && bodyAnimationCount < animations.Anims.Count
+                ? animations.Anims[bodyAnimationCount]?.Frames.FirstOrDefault()
+                : null;
 
             void Descend(SceneBuilder scene, BBone bone, NodeBuilder node, Vector3 translation, Vector3? scale) {
-                maxBone = Math.Max(maxBone, bone.Index);
-
+                var boneRotation = bone == weaponBone && firstWeaponFrame != null
+                    ? firstWeaponFrame.Rotations[0]
+                    : bone.Index >= 0 && bone.Index < bodyBoneCount
+                        ? firstFrame.Rotations[bone.Index + 1]
+                        : default;
                 var rotation = Quaternion.CreateFromYawPitchRoll(
-                    (360 * firstFrame.Rotations[bone.Index + 1].rY / 4096f) * (float)Math.PI / 180,
-                    (360 * firstFrame.Rotations[bone.Index + 1].rX / 4096f) * (float)Math.PI / 180,
-                    (360 * firstFrame.Rotations[bone.Index + 1].rZ / 4096f) * (float)Math.PI / 180
+                    (360 * boneRotation.rY / 4096f) * (float)Math.PI / 180,
+                    (360 * boneRotation.rX / 4096f) * (float)Math.PI / 180,
+                    (360 * boneRotation.rZ / 4096f) * (float)Math.PI / 180
                 );
 
                 node.LocalTransform = SharpGLTF.Transforms.AffineTransform.CreateFromAny(
@@ -80,14 +95,16 @@ namespace Ficedula.FF7.Exporters {
                 );
 
                 foreach (var child in bone.Children) {
-                    var c = node.CreateNode(child.Index.ToString());
+                    var c = node.CreateNode(child == weaponBone ? "WEAPON" : child.Index.ToString());
                     allNodes[child.Index] = c;
+                    if (child == weaponBone)
+                        weaponNode = c;
                     Descend(scene, child, c, new Vector3(0, 0, bone.Length), null);
                 }
             }
 
             void DescendMesh(SceneBuilder scene, BBone bone, NodeBuilder node, Matrix4x4 transform, NodeBuilder[] joints) {
-                if (bone.PFileIndex != null) {
+                if (bone.PFileIndex != null && bone != weaponBone) {
                     foreach (var mesh in BuildMeshes(pFiles[bone.PFileIndex.Value], orderedMaterials, defMaterial, bone.Index)) {
                         scene.AddSkinnedMesh(mesh, transform, joints);
                     }
@@ -109,32 +126,12 @@ namespace Ficedula.FF7.Exporters {
                 allNodes.Where(kv => kv.Key >= 0).OrderBy(kv => kv.Key).Select(kv => kv.Value).ToArray()
             );
             scene.AddNode(root);
-
-            // If there are extra standalone PFiles (e.g. separate weapon/attachment models)
-            // create a node per extra part and add their meshes as children of that node.
-            var weaponNodes = new List<NodeBuilder>();
-            if (extraParts != null) {
-                int wi = 0;
-                foreach (var p in extraParts) {
-                    try {
-                        // Create a weapon node under root so it is a sibling of the skeleton group
-                        var wnode = root.CreateNode($"weapon_{wi}");
-                        weaponNodes.Add(wnode);
-
-                        foreach (var mesh in BuildMeshes(p, orderedMaterials, defMaterial, 0)) {
-                            try {
-                                // Attach the mesh using the weapon node's current local matrix
-                                scene.AddSkinnedMesh(mesh, wnode.LocalMatrix, new NodeBuilder[0]);
-                            } catch {
-                                // Fallback: add as rigid with identity
-                                scene.AddRigidMesh(mesh, Matrix4x4.Identity);
-                            }
-                        }
-
-                        wi++;
-                    } catch {
-                        // ignore parse/build errors for extra parts
-                    }
+            if (weaponParts?.Count > 0 && weaponNode != null && weaponBone != null) {
+                for (int weaponIndex = 0; weaponIndex < weaponParts.Count; weaponIndex++) {
+                    var weaponPart = weaponParts[weaponIndex];
+                    var partNode = weaponNode.CreateNode(weaponPart.Name);
+                    foreach (var mesh in BuildMeshes(weaponPart.Model, orderedMaterials, defMaterial, weaponBone.Index))
+                        scene.AddRigidMesh(mesh, partNode);
                 }
             }
 
@@ -145,10 +142,12 @@ namespace Ficedula.FF7.Exporters {
             var model = scene.ToGltf2(settings);
 
             // Create animations for skeleton nodes (ones with numeric names) as before
-            foreach (var anim in animations.Anims) {
+            int numBodyAnimations = weaponParts?.Count > 0 ? bodyAnimationCount : animations.Anims.Count;
+            for (int animationIndex = 0; animationIndex < numBodyAnimations; animationIndex++) {
+                var anim = animations.Anims[animationIndex];
                 if (anim == null)
                     continue;
-                if (anim.Bones <= (maxBone + 1))
+                if (anim.Bones <= bodyBoneCount)
                     continue;
 
                 var mAnim = model.CreateAnimation();
@@ -161,6 +160,9 @@ namespace Ficedula.FF7.Exporters {
 
                     Dictionary<float, Quaternion> rots = new Dictionary<float, Quaternion>();
                     Dictionary<float, Vector3> trans = new Dictionary<float, Vector3>();
+
+                    if (boneIndex < -1 || boneIndex >= bodyBoneCount)
+                        continue;
 
                     foreach (var frame in anim.Frames) {
                         float additionalX = 0;
@@ -184,50 +186,31 @@ namespace Ficedula.FF7.Exporters {
                         mAnim.CreateTranslationChannel(node, trans);
                     mAnim.CreateRotationChannel(node, rots);
                 }
-            }
-
-            // Create animations for weapon nodes using animations that contain a single bone (weapon anims)
-            var weaponAnims = animations.Anims.Where(a => a != null && a.Bones == 1).ToList();
-            if (weaponAnims.Count > 0) {
-                // Map weaponAnims in order to weapon_x nodes created earlier
-                int wi = 0;
-                foreach (var wanim in weaponAnims) {
-                    if (wi >= weaponNodes.Count)
-                        break;
-
-                    var nodeName = weaponNodes[wi].Name;
-                    var targetNode = model.LogicalNodes.FirstOrDefault(n => n.Name == nodeName);
-                    if (targetNode != null) {
-                        var mAnim = model.CreateAnimation();
-                        mAnim.Name = "AnimWeapon" + wi;
-
-                        Dictionary<float, Quaternion> rots = new Dictionary<float, Quaternion>();
-                        Dictionary<float, Vector3> trans = new Dictionary<float, Vector3>();
-
-                        int c = 0;
-                        foreach (var frame in wanim.Frames) {
-                            float time = c / 15f;
-                            // Weapon translation: do NOT negate Y (authored in visual space)
-                            trans[time] = new Vector3(frame.X, frame.Y, frame.Z) * Options.Scale;
-
-                            // Weapon rotation uses the single bone at index 0
-                            var rotation = Quaternion.CreateFromYawPitchRoll(
+                if (weaponBone != null && animationIndex < weaponAnimationCount && animationIndex + bodyAnimationCount < animations.Anims.Count) {
+                    var weaponAnim = animations.Anims[bodyAnimationCount + animationIndex];
+                    var targetNode = model.LogicalNodes.FirstOrDefault(n => n.Name == "WEAPON");
+                    if (weaponAnim != null && weaponAnim.Bones == 1 && targetNode != null) {
+                        Dictionary<float, Quaternion> weaponRots = new();
+                        Dictionary<float, Vector3> weaponTrans = new();
+                        for (int frameIndex = 0; frameIndex < anim.Frames.Length; frameIndex++) {
+                            var frame = weaponAnim.Frames[Math.Min(frameIndex, weaponAnim.Frames.Length - 1)];
+                            var bodyFrame = anim.Frames[frameIndex];
+                            float time = frameIndex / 15f;
+                            // Frame.Y is stored in the opposite sign convention from Kujata's
+                            // decoded root translation, so the relative weapon Y offset keeps
+                            // the raw delta's sign here.
+                            weaponTrans[time] = new Vector3(frame.X - bodyFrame.X, frame.Y - bodyFrame.Y, frame.Z - bodyFrame.Z) * Options.Scale;
+                            weaponRots[time] = Quaternion.CreateFromYawPitchRoll(
                                 (360 * frame.Rotations[0].rY / 4096f) * (float)Math.PI / 180,
                                 (360 * frame.Rotations[0].rX / 4096f) * (float)Math.PI / 180,
                                 (360 * frame.Rotations[0].rZ / 4096f) * (float)Math.PI / 180
                             );
-                            rots[time] = rotation;
-
-                            c++;
                         }
-
-                        if (trans.Count > 0)
-                            mAnim.CreateTranslationChannel(targetNode, trans);
-                        if (rots.Count > 0)
-                            mAnim.CreateRotationChannel(targetNode, rots);
+                        if (weaponTrans.Count > 0)
+                            mAnim.CreateTranslationChannel(targetNode, weaponTrans);
+                        if (weaponRots.Count > 0)
+                            mAnim.CreateRotationChannel(targetNode, weaponRots);
                     }
-
-                    wi++;
                 }
             }
 
@@ -264,8 +247,6 @@ namespace Ficedula.FF7.Exporters {
             //TODO - very similar to code in main Braver project - move into Ficedula.FF7
             var texs = Enumerable.Range((int)'c', 10).Select(i => modelCode + "a" + ((char)i).ToString());
             int codecounter = 12;
-            // Track which data files are consumed for the main skeleton (so we don't duplicate them)
-            var usedDataFiles = new List<string>();
             Func<string?> NextData = () => {
                 char c1, c2;
                 string data;
@@ -277,38 +258,32 @@ namespace Ficedula.FF7.Exporters {
                     codecounter++;
                     data = modelCode + c1.ToString() + c2.ToString();
                 } while (!_source.Exists(data));
-                usedDataFiles.Add(data);
                 return data;
             };
 
-            // Collect extra standalone PFiles (e.g. separate weapon/attachment models) that
-            // exist in the same two-letter suffix space but were not consumed by the main
-            // model's NextData iterator.
-            var extraParts = new List<PFile>();
-            // Only consider suffixes starting with 'c' (e.g. rtca..rtcz)
-            char targetPrefix = 'c';
-            for (int i = 0; i < 26; i++) {
-                char c1 = targetPrefix;
-                char c2 = (char)('a' + i);
-                string candidate = modelCode + c1.ToString() + c2.ToString();
+            int bodyAnimationCount, weaponAnimationCount;
+            using (var s = _source.Open(modelCode + "aa")) {
+                s.Position = 0x1C;
+                bodyAnimationCount = s.ReadI32();
+                s.Position = 0x28;
+                weaponAnimationCount = s.ReadI32();
+            }
 
-                if (usedDataFiles.Contains(candidate))
-                    continue;
-
-                using (var s = _source.TryOpen(candidate)) {
+            List<(string Name, PFile Model)> weaponParts = new();
+            for (char suffix = 'k'; suffix <= 'z'; suffix++) {
+                using (var s = _source.TryOpen(modelCode + "c" + suffix)) {
                     if (s == null)
                         continue;
-
                     try {
-                        var p = new PFile(s);
-                        extraParts.Add(p);
+                        weaponParts.Add(($"weapon_{modelCode}c{suffix}", new PFile(s)));
                     } catch {
-                        // ignore non-PFile entries
+                        // Skip entries that are not polygon files.
                     }
                 }
             }
 
-            return BuildScene(modelCode + "aa", modelCode + "da", texs, NextData, extraParts);
+            return BuildScene(modelCode + "aa", modelCode + "da", texs, NextData, weaponParts,
+                bodyAnimationCount, weaponAnimationCount);
         }
     }
 }
