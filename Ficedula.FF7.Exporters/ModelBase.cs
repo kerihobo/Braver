@@ -13,7 +13,6 @@ using System.Linq;
 using System.Numerics;
 using SkiaSharp;
 using SharpGLTF.Schema2;
-using System.Security.Cryptography;
 
 namespace Ficedula.FF7.Exporters {
 
@@ -24,6 +23,9 @@ namespace Ficedula.FF7.Exporters {
     }
 
     public class ModelBase {
+
+        private const int BakedTextureSize = 1024;
+        private const int BakedTileSize = 8;
 
         protected ModelBaseOptions _options;
 
@@ -39,9 +41,46 @@ namespace Ficedula.FF7.Exporters {
                 return Math.Pow((value + a) / (1 + a), 2.4);
         }
 
+        private static double LinearToSRGB(double value) {
+            const double a = 0.055;
+            value = Math.Clamp(value, 0, 1);
+            if (value <= 0.0031308)
+                return value * 12.92;
+            return (1 + a) * Math.Pow(value, 1 / 2.4) - a;
+        }
+
         protected SKColor ColourToSK(uint colour) {
-            byte[] b = BitConverter.GetBytes(colour);
-            return new SKColor(b[0], b[1], b[2], b[3]);
+            return ColourToSK(GetBakedLinearColour(colour));
+        }
+
+        private static SKColor ColourToSK(Vector3 linear) {
+            return new SKColor(
+                ToTextureChannel(linear.X),
+                ToTextureChannel(linear.Y),
+                ToTextureChannel(linear.Z),
+                255
+            );
+        }
+
+        private Vector3 GetBakedLinearColour(uint colour) {
+            var c = new Vector3(
+                (colour & 0xff) / 255f,
+                ((colour >> 8) & 0xff) / 255f,
+                ((colour >> 16) & 0xff) / 255f
+            );
+            if (_options.ConvertSRGBToLinear) {
+                c = new Vector3(
+                    (float)SRGBToLinear(c.X),
+                    (float)SRGBToLinear(c.Y),
+                    (float)SRGBToLinear(c.Z)
+                );
+            }
+            return c;
+        }
+
+        private static byte ToTextureChannel(float linearChannel) {
+            double srgbChannel = LinearToSRGB(linearChannel);
+            return (byte)Math.Clamp((int)Math.Round(srgbChannel * 255), 0, 255);
         }
 
         private (Vector2 tc0, Vector2 tc1, Vector2 tc2) GetBakedCoords(uint c0, uint c1, uint c2) {
@@ -50,30 +89,40 @@ namespace Ficedula.FF7.Exporters {
             if (_bakedColours.TryGetValue((sorted[0], sorted[1], sorted[2]), out var coord)) {
                 (x, y) = coord;
             } else {
-                x = 2 * (_bakedColours.Count % 128);
-                y = 2 * (_bakedColours.Count / 128);
+                int tilesPerRow = BakedTextureSize / BakedTileSize;
+                if (_bakedColours.Count >= tilesPerRow * tilesPerRow)
+                    throw new InvalidOperationException("The baked vertex-colour atlas is full.");
 
-                SKColor s0 = ColourToSK(sorted[0]),
-                    s1 = ColourToSK(sorted[1]),
-                    s2 = ColourToSK(sorted[2]);
-                SKColor sMix = new SKColor(
-                    (byte)((s1.Red + s2.Red) / 2),
-                    (byte)((s1.Green + s2.Green) / 2),
-                    (byte)((s1.Blue + s2.Blue) / 2),
-                    (byte)((s1.Alpha + s2.Alpha) / 2)
-                );
-                _bakedTexture.SetPixel(x, y, s0);
-                _bakedTexture.SetPixel(x + 1, y, s1);
-                _bakedTexture.SetPixel(x, y + 1, s2);
-                _bakedTexture.SetPixel(x + 1, y + 1, sMix);
+                x = BakedTileSize * (_bakedColours.Count % tilesPerRow);
+                y = BakedTileSize * (_bakedColours.Count / tilesPerRow);
+
+                Vector3 c0Linear = GetBakedLinearColour(sorted[0]);
+                Vector3 c1Linear = GetBakedLinearColour(sorted[1]);
+                Vector3 c2Linear = GetBakedLinearColour(sorted[2]);
+
+                // The UVs map this tile to a right triangle. Store the affine colour
+                // plane across the tile so bilinear filtering reproduces barycentric
+                // vertex-colour interpolation. Values outside the triangle are only
+                // a filter gutter; clamp them to the texture's representable range.
+                for (int py = 0; py < BakedTileSize; py++) {
+                    float v = py / (float)(BakedTileSize - 1);
+                    for (int px = 0; px < BakedTileSize; px++) {
+                        float u = px / (float)(BakedTileSize - 1);
+                        Vector3 colour = c0Linear
+                            + (c1Linear - c0Linear) * u
+                            + (c2Linear - c0Linear) * v;
+                        colour = Vector3.Clamp(colour, Vector3.Zero, Vector3.One);
+                        _bakedTexture.SetPixel(x + px, y + py, ColourToSK(colour));
+                    }
+                }
 
                 _bakedColours[(sorted[0], sorted[1], sorted[2])] = (x, y);
             }
 
             Vector2[] coords = new[] {
-                new Vector2((x + 0.5f) / 256, (y + 0.5f) / 256),
-                new Vector2((x + 1.5f) / 256, (y + 0.5f) / 256),
-                new Vector2((x + 0.5f) / 256, (y + 1.5f) / 256),
+                new Vector2((x + 0.5f) / BakedTextureSize, (y + 0.5f) / BakedTextureSize),
+                new Vector2((x + BakedTileSize - 0.5f) / BakedTextureSize, (y + 0.5f) / BakedTextureSize),
+                new Vector2((x + 0.5f) / BakedTextureSize, (y + BakedTileSize - 0.5f) / BakedTextureSize),
             };
 
             return (
@@ -103,7 +152,12 @@ namespace Ficedula.FF7.Exporters {
 
         private void SetupBaking() {
             if (_options.BakeVertexColours) {
-                _bakedTexture ??= new SKBitmap(256, 256);
+                _bakedTexture ??= new SKBitmap(
+                    BakedTextureSize,
+                    BakedTextureSize,
+                    SKColorType.Rgba8888,
+                    SKAlphaType.Opaque
+                );
                 _bakedMaterial ??= new MaterialBuilder("BakedVertexColours")
                     .WithDoubleSide(false)
                     .WithAlpha(SharpGLTF.Materials.AlphaMode.OPAQUE)
@@ -117,6 +171,12 @@ namespace Ficedula.FF7.Exporters {
                     .Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
                     .ToArray();
                 _bakedMaterial.WithChannelImage(KnownChannel.BaseColor, new SharpGLTF.Memory.MemoryImage(data));
+                _bakedMaterial.GetChannel(KnownChannel.BaseColor).Texture.WithSampler(
+                    TextureWrapMode.CLAMP_TO_EDGE,
+                    TextureWrapMode.CLAMP_TO_EDGE,
+                    TextureMipMapFilter.LINEAR,
+                    TextureInterpolationFilter.LINEAR
+                );
             }
         }
 
