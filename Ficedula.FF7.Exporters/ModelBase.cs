@@ -150,6 +150,26 @@ namespace Ficedula.FF7.Exporters {
             return c;
         }
 
+        private static (Vector3 n0, Vector3 n1, Vector3 n2) GetTriangleNormals(
+            PFileVert v0, PFileVert v1, PFileVert v2) {
+            Vector3 faceNormal = Vector3.Cross(
+                v1.Position - v0.Position,
+                v2.Position - v0.Position
+            );
+            faceNormal = faceNormal.LengthSquared() > 0
+                ? Vector3.Normalize(faceNormal)
+                : Vector3.UnitY;
+
+            // Battle P files often have no normals. A valid vertex at the origin
+            // would then have a default position/normal pair, which MeshBuilder
+            // treats as an empty vertex and drops its triangles.
+            return (
+                v0.Normal == Vector3.Zero ? faceNormal : v0.Normal,
+                v1.Normal == Vector3.Zero ? faceNormal : v1.Normal,
+                v2.Normal == Vector3.Zero ? faceNormal : v2.Normal
+            );
+        }
+
         private void SetupBaking() {
             if (_options.BakeVertexColours) {
                 _bakedTexture ??= new SKBitmap(
@@ -192,19 +212,20 @@ namespace Ficedula.FF7.Exporters {
                         var v0 = group.Verts[group.Indices[i]];
                         var v1 = group.Verts[group.Indices[i + (_options.SwapWinding ? 2 : 1)]];
                         var v2 = group.Verts[group.Indices[i + (_options.SwapWinding ? 1 : 2)]];
+                        (var n0, var n1, var n2) = GetTriangleNormals(v0, v1, v2);
 
                         var vb0 = new VertexBuilder<VertexPositionNormal, VertexColor1Texture1, VertexJoints4>(
-                            new VertexPositionNormal(v0.Position, v0.Normal),
+                            new VertexPositionNormal(v0.Position, n0),
                             new VertexColor1Texture1(UnpackColour(v0.Colour), v0.TexCoord),
                             new VertexJoints4(boneIndex)
                         );
                         var vb1 = new VertexBuilder<VertexPositionNormal, VertexColor1Texture1, VertexJoints4>(
-                            new VertexPositionNormal(v1.Position, v1.Normal),
+                            new VertexPositionNormal(v1.Position, n1),
                             new VertexColor1Texture1(UnpackColour(v1.Colour), v1.TexCoord),
                             new VertexJoints4(boneIndex)
                         );
                         var vb2 = new VertexBuilder<VertexPositionNormal, VertexColor1Texture1, VertexJoints4>(
-                            new VertexPositionNormal(v2.Position, v2.Normal),
+                            new VertexPositionNormal(v2.Position, n2),
                             new VertexColor1Texture1(UnpackColour(v2.Colour), v2.TexCoord),
                             new VertexJoints4(boneIndex)
                         );
@@ -219,21 +240,22 @@ namespace Ficedula.FF7.Exporters {
                         var v0 = group.Verts[group.Indices[i]];
                         var v1 = group.Verts[group.Indices[i + (_options.SwapWinding ? 2 : 1)]];
                         var v2 = group.Verts[group.Indices[i + (_options.SwapWinding ? 1 : 2)]];
+                        (var n0, var n1, var n2) = GetTriangleNormals(v0, v1, v2);
 
                         (var tc0, var tc1, var tc2) = GetBakedCoords(v0.Colour, v1.Colour, v2.Colour);
 
                         var vb0 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexJoints4>(
-                            new VertexPositionNormal(v0.Position, v0.Normal),
+                            new VertexPositionNormal(v0.Position, n0),
                             new VertexTexture1(tc0),
                             new VertexJoints4(boneIndex)
                         );
                         var vb1 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexJoints4>(
-                            new VertexPositionNormal(v1.Position, v1.Normal),
+                            new VertexPositionNormal(v1.Position, n1),
                             new VertexTexture1(tc1),
                             new VertexJoints4(boneIndex)
                         );
                         var vb2 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexJoints4>(
-                            new VertexPositionNormal(v2.Position, v2.Normal),
+                            new VertexPositionNormal(v2.Position, n2),
                             new VertexTexture1(tc2),
                             new VertexJoints4(boneIndex)
                         );
@@ -248,19 +270,20 @@ namespace Ficedula.FF7.Exporters {
                         var v0 = group.Verts[group.Indices[i]];
                         var v1 = group.Verts[group.Indices[i + (_options.SwapWinding ? 2 : 1)]];
                         var v2 = group.Verts[group.Indices[i + (_options.SwapWinding ? 1 : 2)]];
+                        (var n0, var n1, var n2) = GetTriangleNormals(v0, v1, v2);
 
                         var vb0 = new VertexBuilder<VertexPositionNormal, VertexColor1, VertexJoints4>(
-                            new VertexPositionNormal(v0.Position, v0.Normal),
+                            new VertexPositionNormal(v0.Position, n0),
                             new VertexColor1(UnpackColour(v0.Colour)),
                             new VertexJoints4(boneIndex)
                         );
                         var vb1 = new VertexBuilder<VertexPositionNormal, VertexColor1, VertexJoints4>(
-                            new VertexPositionNormal(v1.Position, v1.Normal),
+                            new VertexPositionNormal(v1.Position, n1),
                             new VertexColor1(UnpackColour(v1.Colour)),
                             new VertexJoints4(boneIndex)
                         );
                         var vb2 = new VertexBuilder<VertexPositionNormal, VertexColor1, VertexJoints4>(
-                            new VertexPositionNormal(v2.Position, v2.Normal),
+                            new VertexPositionNormal(v2.Position, n2),
                             new VertexColor1(UnpackColour(v2.Colour)),
                             new VertexJoints4(boneIndex)
                         );
