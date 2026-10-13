@@ -9,6 +9,7 @@ using System;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace CrossSlash {
 
@@ -44,9 +45,10 @@ namespace CrossSlash {
         private DataSource _source;
         private bool _magicModels;
         private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
-        private TextBox _txtModel, _txtScale;
-        private ListBox _lstModels;
+        private readonly TextBox _txtModel, _txtScale, _txtBattlefield;
+        private readonly ListBox _lstModels, _lstBattlefields;
         private readonly List<string> _modelCodes;
+        private readonly List<string> _battlefieldCodes;
 
         public BattleExportWindow(DataSource source, bool magicModels = false) {
             _source = source;
@@ -54,13 +56,15 @@ namespace CrossSlash {
             _modelCodes = magicModels
                 ? ModelBatchDiscovery.FindMagicModels(source)
                 : ModelBatchDiscovery.FindBattleModels(source);
+            _battlefieldCodes = magicModels ? new List<string>() : ModelBatchDiscovery.FindBattleLocations(source);
             _txtModel = DesktopUi.CreateTextBox();
             _txtScale = DesktopUi.CreateTextBox(magicModels ? "0.1" : "1");
+            _txtBattlefield = DesktopUi.CreateTextBox();
             _lstModels = new ListBox {
                 ItemsSource = _modelCodes,
                 MinHeight = 150,
                 MaxHeight = 230,
-                BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 227, 237)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
             };
@@ -72,46 +76,99 @@ namespace CrossSlash {
                 _lstModels.SelectedIndex = 0;
                 _txtModel.Text = _modelCodes[0];
             }
+            _lstBattlefields = new ListBox {
+                ItemsSource = _battlefieldCodes,
+                MinHeight = 150,
+                MaxHeight = 230,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4),
+            };
+            _lstBattlefields.SelectionChanged += (_, _) => {
+                if (_lstBattlefields.SelectedItem is string code)
+                    _txtBattlefield.Text = code;
+            };
+            if (_battlefieldCodes.Count > 0) {
+                _lstBattlefields.SelectedIndex = 0;
+                _txtBattlefield.Text = _battlefieldCodes[0];
+            }
             _chkSRGB = new CheckBox { Content = "Convert colours from SRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 20, 10) };
             _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 20, 10) };
             _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 20, 10) };
 
             var content = new StackPanel();
-            content.Children.Add(DesktopUi.CreateSectionTitle("Model settings"));
-            content.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Select one below or enter a model code manually."));
-            content.Children.Add(DesktopUi.CreateFormRow("Available models", _lstModels));
-            content.Children.Add(DesktopUi.CreateFormRow("Model code", _txtModel));
+            content.Children.Add(DesktopUi.CreateSectionTitle("Export settings"));
             content.Children.Add(DesktopUi.CreateFormRow("Scale", _txtScale));
             content.Children.Add(new WrapPanel {
-                Margin = new Thickness(0, 4, 0, 18),
+                Margin = new Thickness(0, 4, 0, 12),
                 Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
             });
 
-            var btnExport = DesktopUi.CreateButton("Export", primary: true);
-            btnExport.Click += (_, _) => BtnExport_Clicked();
-            var btnExportAll = DesktopUi.CreateButton(magicModels ? "Export All Summons" : "Export All Battle Models");
-            btnExportAll.Click += (_, _) => BtnExportAll_Clicked();
-            var btnExportAllAnimations = DesktopUi.CreateButton("Export All Animations");
-            btnExportAllAnimations.Click += (_, _) => BtnExportAllAnimations_Clicked();
-            content.Children.Add(DesktopUi.CreateActionRow(btnExport, btnExportAll, btnExportAllAnimations));
-
-            if (!_magicModels) {
-                content.Children.Add(DesktopUi.CreateSectionTitle("Battlefields"));
-                var btnExportBattlefield = DesktopUi.CreateButton("Export Battlefield");
-                btnExportBattlefield.Click += (_, _) => BtnExportBattlefield_Clicked();
-                var btnExportAllBattlefields = DesktopUi.CreateButton("Export All Battlefields");
-                btnExportAllBattlefields.Margin = new Thickness(0);
-                btnExportAllBattlefields.Click += (_, _) => BtnExportAllBattlefields_Clicked();
-                content.Children.Add(DesktopUi.CreateActionRow(btnExportBattlefield, btnExportAllBattlefields));
+            if (_magicModels)
+                content.Children.Add(CreateMagicModelContent());
+            else {
+                var tabs = new TabControl { MinHeight = 430 };
+                tabs.Items.Add(new TabItem { Header = "Battle Models", Content = CreateBattleModelContent() });
+                tabs.Items.Add(new TabItem { Header = "Battlefields", Content = CreateBattlefieldContent() });
+                content.Children.Add(tabs);
             }
 
             DesktopUi.ConfigureWindow(
                 this,
                 magicModels ? "Magic model exporter" : "Battle model exporter",
-                magicModels ? "Export summon models and their animations" : "Export battle models, animations, and battlefields",
+                magicModels ? "Export summon models and their animations" : "Choose a tab to export battle models or battlefield skeletons",
                 content,
                 back: Close
             );
+        }
+
+        private UIElement CreateBattleModelContent() {
+            var panel = new StackPanel { Margin = new Thickness(12) };
+            panel.Children.Add(DesktopUi.CreateSectionTitle("Battle models"));
+            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Select one or enter a model code manually."));
+            panel.Children.Add(DesktopUi.CreateFormRow("Available models", _lstModels));
+            panel.Children.Add(DesktopUi.CreateFormRow("Model code", _txtModel));
+
+            var export = DesktopUi.CreateButton("Export model", primary: true);
+            export.Click += (_, _) => BtnExport_Clicked();
+            var exportAll = DesktopUi.CreateButton("Export all battle models");
+            exportAll.Click += (_, _) => BtnExportAll_Clicked();
+            var exportAnimations = DesktopUi.CreateButton("Export all animations");
+            exportAnimations.Click += (_, _) => BtnExportAllAnimations_Clicked();
+            panel.Children.Add(DesktopUi.CreateActionRow(export, exportAll, exportAnimations));
+            return panel;
+        }
+
+        private UIElement CreateBattlefieldContent() {
+            var panel = new StackPanel { Margin = new Thickness(12) };
+            panel.Children.Add(DesktopUi.CreateSectionTitle("Battlefields"));
+            panel.Children.Add(DesktopUi.CreateHint($"{_battlefieldCodes.Count:N0} battlefield skeletons detected. Select one or enter a location code manually."));
+            panel.Children.Add(DesktopUi.CreateFormRow("Available battlefields", _lstBattlefields));
+            panel.Children.Add(DesktopUi.CreateFormRow("Location code", _txtBattlefield));
+
+            var export = DesktopUi.CreateButton("Export battlefield", primary: true);
+            export.Click += (_, _) => BtnExportBattlefield_Clicked();
+            var exportAll = DesktopUi.CreateButton("Export all battlefields");
+            exportAll.Click += (_, _) => BtnExportAllBattlefields_Clicked();
+            panel.Children.Add(DesktopUi.CreateActionRow(export, exportAll));
+            return panel;
+        }
+
+        private UIElement CreateMagicModelContent() {
+            var panel = new StackPanel();
+            panel.Children.Add(DesktopUi.CreateSectionTitle("Summon models"));
+            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} summons detected. Select one or enter a model code manually."));
+            panel.Children.Add(DesktopUi.CreateFormRow("Available summons", _lstModels));
+            panel.Children.Add(DesktopUi.CreateFormRow("Model code", _txtModel));
+
+            var export = DesktopUi.CreateButton("Export model", primary: true);
+            export.Click += (_, _) => BtnExport_Clicked();
+            var exportAll = DesktopUi.CreateButton("Export all summons");
+            exportAll.Click += (_, _) => BtnExportAll_Clicked();
+            var exportAnimations = DesktopUi.CreateButton("Export all animations");
+            exportAnimations.Click += (_, _) => BtnExportAllAnimations_Clicked();
+            panel.Children.Add(DesktopUi.CreateActionRow(export, exportAll, exportAnimations));
+            return panel;
         }
 
         private void BtnExport_Clicked() {
@@ -199,7 +256,9 @@ namespace CrossSlash {
                     return;
 
                 var exporter = new BattleModel(_source, GetOptions(scale));
-                string locationCode = _txtModel.Text;
+                if (string.IsNullOrWhiteSpace(_txtBattlefield.Text))
+                    throw new Exception("Select a battlefield or enter its location code.");
+                string locationCode = _txtBattlefield.Text;
                 var model = exporter.BuildSceneFromBattleLocation(locationCode);
                 model.SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
