@@ -57,7 +57,7 @@ namespace CrossSlash {
         private ListView _lvHRCs;
         private TextView _txtAnims;
         private List<string> _hrcFiles;
-        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
+        private CheckBox _chkAllCompatible, _chkSRGB, _chkSwapWinding, _chkBakeColours;
 
         private string _glbFile;
         private DataSource _source;
@@ -91,10 +91,18 @@ namespace CrossSlash {
                 Height = 8,
             };
 
+            _chkAllCompatible = new CheckBox {
+                Checked = true,
+                Text = "Use all compatible animations",
+                Y = Pos.Bottom(_txtAnims) + 1,
+            };
+            _txtAnims.Enabled = false;
+            _chkAllCompatible.Toggled += checkedState => _txtAnims.Enabled = !checkedState;
+
             _chkSRGB = new CheckBox {
                 Checked = true,
                 Text = "Convert colours from SRGB->Linear",
-                Y = Pos.Bottom(_txtAnims) + 1,
+                Y = Pos.Bottom(_chkAllCompatible) + 1,
             };
             _chkSwapWinding = new CheckBox {
                 Checked = false,
@@ -144,6 +152,7 @@ namespace CrossSlash {
 
 
             Add(lblHRC, _lvHRCs, lblAnims, _txtAnims, 
+                _chkAllCompatible,
                 _chkSRGB, _chkSwapWinding, _chkBakeColours,
                 btnGLB, _lblGLB, btnExport, btnExportAll, btnBack);
         }
@@ -161,7 +170,7 @@ namespace CrossSlash {
                     throw new Exception("No GLB save as filename selected");
                 if (_lvHRCs.SelectedItem < 0)
                     throw new Exception("No HRC file selected");
-                if (!anims.Any())
+                if (!_chkAllCompatible.Checked && !anims.Any())
                     throw new Exception("No animations specified");
 
                 var options = new ModelBaseOptions {
@@ -170,15 +179,29 @@ namespace CrossSlash {
                     BakeVertexColours = _chkBakeColours.Checked,
                 };
                 var exporter = new FieldModel(_source, options);
-                foreach (var item in anims) {
-                    System.Diagnostics.Debug.WriteLine(item);
+                SharpGLTF.Schema2.ModelRoot model;
+                string successMessage = "Export Succeeded";
+                if (_chkAllCompatible.Checked) {
+                    var animationFiles = _source.AllFiles
+                        .Where(file => Path.GetExtension(file).Equals(".a", StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    model = exporter.BuildScene(
+                        _hrcFiles[_lvHRCs.SelectedItem],
+                        animationFiles,
+                        true,
+                        out var usedAnimations
+                    );
+                    successMessage += $"\nCompatible animations included: {usedAnimations.Count}";
+                } else {
+                    foreach (var item in anims)
+                        System.Diagnostics.Debug.WriteLine(item);
+                    model = exporter.BuildScene(_hrcFiles[_lvHRCs.SelectedItem], anims);
                 }
-                var model = exporter.BuildScene(_hrcFiles[_lvHRCs.SelectedItem], anims);
-                System.Diagnostics.Debug.WriteLine("WHAT");
 
                 model.SaveGLB(_glbFile);
 
-                MessageBox.Query("Success", "Export Succeeded", "OK");
+                MessageBox.Query("Success", successMessage, "OK");
             } catch (Exception ex) {
                 MessageBox.ErrorQuery("Error", ex.Message, "OK");
             }
