@@ -97,7 +97,8 @@ namespace CrossSlash {
                 Y = Pos.Bottom(_txtAnims) + 1,
             };
             _txtAnims.Enabled = false;
-            _chkAllCompatible.Toggled += checkedState => _txtAnims.Enabled = !checkedState;
+            // Toggled supplies the previous state, so read Checked after the change.
+            _chkAllCompatible.Toggled += _ => _txtAnims.Enabled = !_chkAllCompatible.Checked;
 
             _chkSRGB = new CheckBox {
                 Checked = true,
