@@ -4,76 +4,76 @@
 //
 // SPDX-License-Identifier: EPL-2.0
 
-using Terminal.Gui;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace CrossSlash {
     internal sealed class PreferencesWindow : Window {
-        private readonly TextField _txtSourcePath;
+        private readonly TextBox _txtSourcePath;
 
-        public bool Saved { get; private set; }
-        public string? DefaultSourcePath => _txtSourcePath.Text?.ToString();
+        public string? DefaultSourcePath => _txtSourcePath.Text;
 
         public PreferencesWindow(string? defaultSourcePath) {
-            Title = "CrossSlash Preferences";
+            _txtSourcePath = DesktopUi.CreateTextBox(defaultSourcePath);
 
-            var lblSource = new Label {
-                Text = "Default LGP or source folder",
-                Width = Dim.Percent(32),
-            };
-            _txtSourcePath = new TextField {
-                X = Pos.Right(lblSource) + 1,
-                Y = lblSource.Y,
-                Width = Dim.Fill(1),
-                Text = defaultSourcePath ?? string.Empty,
-            };
+            var content = new StackPanel();
+            content.Children.Add(DesktopUi.CreateSectionTitle("Default source"));
+            content.Children.Add(DesktopUi.CreateHint("This path is used as the starting location when an exporter has no saved source."));
+            content.Children.Add(DesktopUi.CreateFormRow("LGP or folder path", _txtSourcePath, 150));
 
-            var btnLgp = new Button {
-                Text = "Browse LGP...",
-                Y = Pos.Bottom(_txtSourcePath) + 1,
+            var browseButtons = new StackPanel {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(166, 0, 0, 20),
             };
-            btnLgp.Clicked += () => {
-                string? path = NativeFilePicker.OpenLgp(_txtSourcePath.Text?.ToString());
+            var browseLgp = DesktopUi.CreateButton("Browse LGP archive");
+            browseLgp.Click += (_, _) => {
+                string? path = NativeFilePicker.OpenLgp(_txtSourcePath.Text, this);
                 if (path != null)
                     _txtSourcePath.Text = path;
             };
-
-            var btnFolder = new Button {
-                Text = "Browse folder...",
-                X = Pos.Right(btnLgp) + 1,
-                Y = btnLgp.Y,
-            };
-            btnFolder.Clicked += () => {
-                string? path = NativeFilePicker.OpenFolder(
-                    "Choose the default folder to read data from",
-                    _txtSourcePath.Text?.ToString()
-                );
+            var browseFolder = DesktopUi.CreateButton("Browse folder");
+            browseFolder.Margin = new Thickness(0);
+            browseFolder.Click += (_, _) => {
+                string? path = NativeFilePicker.OpenFolder("Choose the default source folder", _txtSourcePath.Text, this);
                 if (path != null)
                     _txtSourcePath.Text = path;
             };
+            browseButtons.Children.Add(browseLgp);
+            browseButtons.Children.Add(browseFolder);
+            content.Children.Add(browseButtons);
 
-            var btnSave = new Button {
-                Text = "Save",
-                Y = Pos.Bottom(btnFolder) + 1,
+            var actions = new StackPanel {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
             };
-            btnSave.Clicked += () => {
-                string? path = DefaultSourcePath;
-                if (!string.IsNullOrWhiteSpace(path) && !File.Exists(path) && !Directory.Exists(path)) {
-                    MessageBox.ErrorQuery("Invalid path", "Choose an existing LGP file or folder, or clear the path.", "OK");
-                    return;
-                }
+            var cancel = DesktopUi.CreateButton("Cancel");
+            cancel.Click += (_, _) => Close();
+            var save = DesktopUi.CreateButton("Save", primary: true);
+            save.Margin = new Thickness(0);
+            save.Click += (_, _) => Save();
+            actions.Children.Add(cancel);
+            actions.Children.Add(save);
+            content.Children.Add(actions);
 
-                Saved = true;
-                Application.RequestStop();
-            };
+            DesktopUi.ConfigureWindow(
+                this,
+                "Preferences",
+                "Set a default source location",
+                content,
+                width: 720,
+                height: 420
+            );
+        }
 
-            var btnCancel = new Button {
-                Text = "Cancel",
-                X = Pos.Right(btnSave) + 1,
-                Y = btnSave.Y,
-            };
-            btnCancel.Clicked += () => Application.RequestStop();
+        private void Save() {
+            string? path = DefaultSourcePath;
+            if (!string.IsNullOrWhiteSpace(path) && !File.Exists(path) && !Directory.Exists(path)) {
+                DesktopUi.ShowError(this, "Invalid path", "Choose an existing LGP archive or folder, or clear the path.");
+                return;
+            }
 
-            Add(lblSource, _txtSourcePath, btnLgp, btnFolder, btnSave, btnCancel);
+            DialogResult = true;
+            Close();
         }
     }
 }

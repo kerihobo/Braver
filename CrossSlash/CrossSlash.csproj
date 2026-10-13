@@ -1,16 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net7.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
 	  <Version>0.2.1</Version>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Terminal.Gui" Version="1.14.0" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Ficedula.FF7.Exporters\Ficedula.FF7.Exporters.csproj" />

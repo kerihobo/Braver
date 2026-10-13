@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: EPL-2.0
 
 using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
 
 namespace CrossSlash {
     internal static class NativeFilePicker {
@@ -18,7 +20,7 @@ namespace CrossSlash {
 
         private static readonly Guid ShellItemGuid = new("43826D1E-E718-42EE-BC55-A1E261C37BFE");
 
-        public static string? OpenLgp(string? currentPath) {
+        public static string? OpenLgp(string? currentPath, Window? owner = null) {
             var dialog = (IFileOpenDialog)new FileOpenDialogCom();
             try {
                 dialog.SetTitle("Select an FF7 LGP archive");
@@ -30,7 +32,7 @@ namespace CrossSlash {
                 SetInitialFolder(dialog, currentPath);
                 SetOptions(dialog, ForceFileSystem | FileMustExist | PathMustExist | NoChangeDirectory);
 
-                if (!Show(dialog))
+                if (!Show(dialog, owner))
                     return null;
 
                 dialog.GetResult(out IShellItem item);
@@ -44,14 +46,14 @@ namespace CrossSlash {
             }
         }
 
-        public static string? OpenFolder(string title, string? currentPath) {
+        public static string? OpenFolder(string title, string? currentPath, Window? owner = null) {
             var dialog = (IFileOpenDialog)new FileOpenDialogCom();
             try {
                 dialog.SetTitle(title);
                 SetInitialFolder(dialog, currentPath);
                 SetOptions(dialog, ForceFileSystem | PathMustExist | PickFolders | NoChangeDirectory);
 
-                if (!Show(dialog))
+                if (!Show(dialog, owner))
                     return null;
 
                 dialog.GetResult(out IShellItem item);
@@ -65,7 +67,7 @@ namespace CrossSlash {
             }
         }
 
-        public static string? SaveGlb(string? currentPath) {
+        public static string? SaveGlb(string? currentPath, Window? owner = null) {
             var dialog = (IFileSaveDialog)new FileSaveDialogCom();
             try {
                 dialog.SetTitle("Export GLB");
@@ -79,7 +81,7 @@ namespace CrossSlash {
                 SetInitialFolder(dialog, currentPath);
                 SetOptions(dialog, ForceFileSystem | PathMustExist | OverwritePrompt | NoChangeDirectory);
 
-                if (!Show(dialog))
+                if (!Show(dialog, owner))
                     return null;
 
                 dialog.GetResult(out IShellItem item);
@@ -93,8 +95,9 @@ namespace CrossSlash {
             }
         }
 
-        private static bool Show(IFileDialog dialog) {
-            int result = dialog.Show(IntPtr.Zero);
+        private static bool Show(IFileDialog dialog, Window? owner) {
+            IntPtr ownerHandle = owner == null ? IntPtr.Zero : new WindowInteropHelper(owner).Handle;
+            int result = dialog.Show(ownerHandle);
             if (result == HResultCancelled)
                 return false;
 

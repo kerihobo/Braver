@@ -1,53 +1,44 @@
-﻿// This program and the accompanying materials are made available under the terms of the
-//  Eclipse Public License v2.0 which accompanies this distribution, and is available at
-//  https://www.eclipse.org/legal/epl-v20.html
-//  
-//  SPDX-License-Identifier: EPL-2.0
+// This program and the accompanying materials are made available under the terms of the
+// Eclipse Public License v2.0 which accompanies this distribution, and is available at
+// https://www.eclipse.org/legal/epl-v20.html
+//
+// SPDX-License-Identifier: EPL-2.0
 
 using Ficedula.FF7.Exporters;
-using System;
-using System.Linq;
-using Terminal.Gui;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace CrossSlash {
     public class Audio : ExportKind {
         public override string Help =>
-@"
-    Usage: CrossSlash Audio [SoundFolder] [DestFolder] [AudioID] [AudioID] [AudioID...]
-        SoundFolder should be the folder containing audio.fmt/audio.dat
-        AudioID can either be the numeric ID of a sound effect, or * to extract all.
-        e.g.
-        CrossSlash Audio C:\FF7\data\sound C:\temp\audio 0 1 33 35
-
-        Sounds are exported to files named <soundID>.wav in the specified destination folder.
+@"Usage: CrossSlash Audio [SoundFolder] [DestFolder] [AudioID] [AudioID] [AudioID...]
+    SoundFolder should contain audio.fmt and audio.dat.
+    AudioID can be a numeric sound effect ID, or * to extract all.
+    Example: CrossSlash Audio C:\FF7\data\sound C:\temp\audio 0 1 33 35
+    Sounds are written as <soundID>.wav in the destination folder.
 ";
 
-        public override object Config => null;
-
+        public override object Config => null!;
         public override bool HasGui => true;
-
         public override string Name => "Audio Extractor";
 
         public override void Execute(DataSource source, string dest, IEnumerable<string> parameters) {
-            var audio = new Ficedula.FF7.Audio(
-                source.Open("audio.dat"),
-                source.Open("audio.fmt")
-            );
-            foreach(string parm in parameters) {
-                IEnumerable<int> range;
-                if (parm == "*")
-                    range = Enumerable.Range(0, audio.EntryCount);
-                else
-                    range = Enumerable.Repeat(int.Parse(parm), 1);
-
-                foreach(int id in range) {
+            using var dataStream = source.Open("audio.dat");
+            using var formatStream = source.Open("audio.fmt");
+            var audio = new Ficedula.FF7.Audio(dataStream, formatStream);
+            Directory.CreateDirectory(dest);
+            foreach (string parameter in parameters) {
+                IEnumerable<int> range = parameter == "*"
+                    ? Enumerable.Range(0, audio.EntryCount)
+                    : Enumerable.Repeat(int.Parse(parameter), 1);
+                foreach (int id in range) {
                     if (audio.IsValid(id)) {
                         Console.WriteLine($"Exporting sound {id}");
-                        using (var fs = File.OpenWrite(Path.Combine(dest, $"{id}.wav")))
-                            audio.Export(id, fs);
-                    } else
+                        using var output = File.Create(Path.Combine(dest, $"{id}.wav"));
+                        audio.Export(id, output);
+                    } else {
                         Console.WriteLine($"Skipping invalid sound effect {id}");
-
+                    }
                 }
             }
         }
@@ -56,76 +47,71 @@ namespace CrossSlash {
     }
 
     public class AudioWindow : Window {
-        private DataSource _source;
-        private Audio _exporter;
-        private string? _dest;
-        private TextView _txtSounds;
+        private readonly DataSource _source;
+        private readonly Audio _exporter;
+        private readonly TextBox _ids;
+        private readonly TextBox _destination;
 
-        public AudioWindow(DataSource source, Audio exporter) { 
+        public AudioWindow(DataSource source, Audio exporter) {
             _source = source;
             _exporter = exporter;
+            _ids = DesktopUi.CreateTextBox();
+            _ids.AcceptsReturn = true;
+            _ids.TextWrapping = TextWrapping.Wrap;
+            _ids.VerticalContentAlignment = VerticalAlignment.Top;
+            _ids.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            _ids.MinHeight = 190;
+            _destination = DesktopUi.CreateTextBox(readOnly: true);
 
-            Label lblSounds = new Label {
-                Y = 1,
-                Text = "Sound IDs to export (leave blank for all)",
-            };
-            _txtSounds = new TextView {
-                Y = Pos.Bottom(lblSounds),
-                Width = Dim.Fill(1),
-                Height = Dim.Sized(10),
-            };
+            var browse = DesktopUi.CreateButton("Browse…");
+            browse.Click += (_, _) => BrowseDestination();
+            var destinationRow = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            destinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
+            destinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            destinationRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            destinationRow.Children.Add(DesktopUi.CreateLabel("Save sounds to"));
+            Grid.SetColumn(_destination, 1);
+            destinationRow.Children.Add(_destination);
+            Grid.SetColumn(browse, 2);
+            browse.Margin = new Thickness(10, 0, 0, 0);
+            destinationRow.Children.Add(browse);
 
-            Button btnDest = new Button {
-                Y = Pos.Bottom(_txtSounds) + 2,
-                Text = "(No destination folder set)",
-                Width = Dim.Fill(5),
-            };
-            btnDest.Clicked += () => {
-                var preferences = PreferencesStore.Load();
-                string? path = NativeFilePicker.OpenFolder(
-                    "Choose the folder to extract to",
-                    preferences.LastExtractDirectory ?? preferences.DefaultSourcePath
-                );
-                if (path != null) {
-                    _dest = path;
-                    btnDest.Text = "Extract to " + _dest;
-                    PreferencesStore.RememberExtractDirectory(path);
-                }
-            };
+            var export = DesktopUi.CreateButton("Export sounds", primary: true);
+            export.Click += (_, _) => ExportSounds();
 
-            var btnExport = new Button {
-                Y = Pos.Bottom(btnDest) + 1,
-                Width = Dim.Fill(1),
-                Text = "Export"
-            };
-            btnExport.Clicked += BtnExport_Clicked;
+            var content = new StackPanel();
+            content.Children.Add(DesktopUi.CreateSectionTitle("Sound effects"));
+            content.Children.Add(DesktopUi.CreateHint("Enter one numeric ID per line. Leave the list blank to export every sound effect."));
+            content.Children.Add(DesktopUi.CreateFormRow("Sound IDs", _ids, 160));
+            content.Children.Add(destinationRow);
+            content.Children.Add(DesktopUi.CreateActionRow(export));
 
-            var btnBack = ExporterWindowNavigation.CreateBackButton();
-
-            Add(btnBack, lblSounds, _txtSounds, btnDest, btnExport);
-
+            DesktopUi.ConfigureWindow(this, "Audio exporter", "Extract Final Fantasy VII sound effects as WAV files", content, back: Close);
         }
 
-        private void BtnExport_Clicked() {
-            if (string.IsNullOrEmpty(_dest)) {
-                MessageBox.ErrorQuery("Error", "Select a destination folder", "OK");
+        private void BrowseDestination() {
+            var preferences = PreferencesStore.Load();
+            string? path = NativeFilePicker.OpenFolder(
+                "Choose the folder to extract to",
+                preferences.LastExtractDirectory ?? preferences.DefaultSourcePath,
+                this
+            );
+            if (path == null)
                 return;
-            }
+            _destination.Text = path;
+            PreferencesStore.RememberExtractDirectory(path);
+        }
 
+        private void ExportSounds() {
             try {
-                var ids = _txtSounds.Text
-                    .ToString()
-                    .Split('\r', '\n')
-                    .Where(s => !string.IsNullOrWhiteSpace(s));
-
-                if (ids.Any())
-                    _exporter.Execute(_source, _dest, ids);
-                else
-                    _exporter.Execute(_source, _dest, new[] { "*" });
-
-                MessageBox.Query("Done", "Export complete", "OK");
+                if (string.IsNullOrWhiteSpace(_destination.Text))
+                    throw new InvalidOperationException("Choose a destination folder first.");
+                string[] ids = _ids.Text
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                _exporter.Execute(_source, _destination.Text, ids.Length > 0 ? ids : new[] { "*" });
+                DesktopUi.ShowInfo(this, "Export complete", $"Sounds were exported to:\n{_destination.Text}");
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Error", ex.Message, "OK");
+                DesktopUi.ShowError(this, "Export failed", ex.Message);
             }
         }
     }

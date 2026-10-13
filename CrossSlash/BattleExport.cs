@@ -7,8 +7,8 @@
 using Ficedula.FF7.Exporters;
 using System;
 using System.Linq;
-using System.Text;
-using Terminal.Gui;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace CrossSlash {
 
@@ -44,110 +44,60 @@ namespace CrossSlash {
         private DataSource _source;
         private bool _magicModels;
         private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
-        private TextField _txtModel, _txtScale;
+        private TextBox _txtModel, _txtScale;
 
         public BattleExportWindow(DataSource source, bool magicModels = false) {
             _source = source;
             _magicModels = magicModels;
-            Title = magicModels ? "CrossSlash Magic Model Exporter" : "CrossSlash Battle Model Exporter";
+            _txtModel = DesktopUi.CreateTextBox();
+            _txtScale = DesktopUi.CreateTextBox(magicModels ? "0.1" : "1");
+            _chkSRGB = new CheckBox { Content = "Convert colours from SRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 20, 10) };
+            _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 20, 10) };
+            _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 20, 10) };
 
-            Label lblModel = new Label {
-                Y = 1,
-                Width = Dim.Percent(25),
-                Text = "Model Code",
-            };
-            _txtModel = new TextField {
-                Y = lblModel.Y,
-                X = Pos.Right(lblModel),
-                Width = Dim.Fill(1),
-            };
+            var content = new StackPanel();
+            content.Children.Add(DesktopUi.CreateSectionTitle("Model settings"));
+            content.Children.Add(DesktopUi.CreateFormRow("Model code", _txtModel));
+            content.Children.Add(DesktopUi.CreateFormRow("Scale", _txtScale));
+            content.Children.Add(new WrapPanel {
+                Margin = new Thickness(0, 4, 0, 18),
+                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
+            });
 
-            Label lblScale = new Label {
-                Y = Pos.Bottom(lblModel) + 1,
-                Width = Dim.Percent(25),
-                Text = "Scale",
-            };
-            _txtScale = new TextField {
-                Y = lblScale.Y,
-                X = Pos.Right(lblScale),
-                Width = Dim.Fill(1),
-                Text = magicModels ? "0.1" : "1",
-            };
+            var btnExport = DesktopUi.CreateButton("Export", primary: true);
+            btnExport.Click += (_, _) => BtnExport_Clicked();
+            var btnExportAll = DesktopUi.CreateButton(magicModels ? "Export All Summons" : "Export All Battle Models");
+            btnExportAll.Click += (_, _) => BtnExportAll_Clicked();
+            var btnExportAllAnimations = DesktopUi.CreateButton("Export All Animations");
+            btnExportAllAnimations.Click += (_, _) => BtnExportAllAnimations_Clicked();
+            content.Children.Add(DesktopUi.CreateActionRow(btnExport, btnExportAll, btnExportAllAnimations));
 
-            _chkSRGB = new CheckBox {
-                Checked = true,
-                Text = "Convert colours from SRGB->Linear",
-                Y = Pos.Bottom(_txtScale) + 1,
-            };
-            _chkSwapWinding = new CheckBox {
-                Checked = false,
-                Text = "Swap triangle winding",
-                Y = Pos.Bottom(_chkSRGB),
-            };
-            _chkBakeColours = new CheckBox {
-                Checked = false,
-                Text = "Bake Vertex Colours to texture",
-                Y = Pos.Bottom(_chkSwapWinding),
-            };
-            var btnGLB = new Button {
-                Text = "Export",
-                Width = Dim.Percent(24),
-                Y = Pos.Bottom(_chkBakeColours) + 1,
-            };
-            btnGLB.Clicked += BtnExport_Clicked;
-
-            var btnExportAll = new Button {
-                X = Pos.Right(btnGLB) + 1,
-                Y = btnGLB.Y,
-                Width = Dim.Percent(37),
-                Text = magicModels ? "Export All Summons" : "Export All Battle Models",
-            };
-            btnExportAll.Clicked += BtnExportAll_Clicked;
-
-            var btnExportAllAnimations = new Button {
-                X = Pos.Right(btnExportAll) + 1,
-                Y = btnGLB.Y,
-                Width = Dim.Fill(1),
-                Text = "Export All Animations",
-            };
-            btnExportAllAnimations.Clicked += BtnExportAllAnimations_Clicked;
-
-            Button? btnExportBattlefield = null;
-            Button? btnExportAllBattlefields = null;
             if (!_magicModels) {
-                btnExportBattlefield = new Button {
-                    Y = Pos.Bottom(btnExportAllAnimations) + 1,
-                    Width = Dim.Percent(50),
-                    Text = "Export Battlefield",
-                };
-                btnExportBattlefield.Clicked += BtnExportBattlefield_Clicked;
-
-                btnExportAllBattlefields = new Button {
-                    X = Pos.Right(btnExportBattlefield) + 1,
-                    Y = btnExportBattlefield.Y,
-                    Width = Dim.Fill(1),
-                    Text = "Export All Battlefields",
-                };
-                btnExportAllBattlefields.Clicked += BtnExportAllBattlefields_Clicked;
+                content.Children.Add(DesktopUi.CreateSectionTitle("Battlefields"));
+                var btnExportBattlefield = DesktopUi.CreateButton("Export Battlefield");
+                btnExportBattlefield.Click += (_, _) => BtnExportBattlefield_Clicked();
+                var btnExportAllBattlefields = DesktopUi.CreateButton("Export All Battlefields");
+                btnExportAllBattlefields.Margin = new Thickness(0);
+                btnExportAllBattlefields.Click += (_, _) => BtnExportAllBattlefields_Clicked();
+                content.Children.Add(DesktopUi.CreateActionRow(btnExportBattlefield, btnExportAllBattlefields));
             }
 
-            var btnBack = ExporterWindowNavigation.CreateBackButton();
-
-            Add(btnBack, lblModel, _txtModel, lblScale, _txtScale,
-                _chkSRGB, _chkSwapWinding, _chkBakeColours,
-                btnGLB, btnExportAll, btnExportAllAnimations);
-            if (btnExportBattlefield != null && btnExportAllBattlefields != null)
-                Add(btnExportBattlefield, btnExportAllBattlefields);
-            Add(btnBack);
+            DesktopUi.ConfigureWindow(
+                this,
+                magicModels ? "Magic model exporter" : "Battle model exporter",
+                magicModels ? "Export summon models and their animations" : "Export battle models, animations, and battlefields",
+                content,
+                back: Close
+            );
         }
 
         private void BtnExport_Clicked() {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (string.IsNullOrWhiteSpace(_txtModel.Text.ToString()))
+                if (string.IsNullOrWhiteSpace(_txtModel.Text))
                     throw new Exception("No model file selected");
-                if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
+                if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
                 string? outputFile = ChooseGlbPath();
@@ -155,13 +105,13 @@ namespace CrossSlash {
                     return;
 
                 var options = GetOptions(scale);
-                string modelCode = _txtModel.Text?.ToString() ?? string.Empty;
+                string modelCode = _txtModel.Text;
                 var exporter = new BattleModel(_source, options);
                 exporter.BuildSceneAuto(modelCode).SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
-                MessageBox.Query("Success", "Export succeeded", "OK");
+                DesktopUi.ShowInfo(this, "Success", "Export succeeded");
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Error", ex.Message, "OK");
+                DesktopUi.ShowError(this, "Error", ex.Message);
             }
         }
 
@@ -169,7 +119,7 @@ namespace CrossSlash {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
+                if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
                 var modelCodes = _magicModels
@@ -183,7 +133,8 @@ namespace CrossSlash {
                 var preferences = PreferencesStore.Load();
                 string? outputDirectory = NativeFilePicker.OpenFolder(
                     _magicModels ? "Choose a folder for all magic model exports" : "Choose a folder for all battle model exports",
-                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
+                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                    this
                 );
                 if (outputDirectory == null)
                     return;
@@ -207,9 +158,9 @@ namespace CrossSlash {
                     if (failures.Count > 5)
                         result += "\n...";
                 }
-                MessageBox.Query("Export All", result, "OK");
+                DesktopUi.ShowInfo(this, "Export All", result);
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Error", ex.Message, "OK");
+                DesktopUi.ShowError(this, "Error", ex.Message);
             }
         }
 
@@ -217,7 +168,7 @@ namespace CrossSlash {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
+                if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
                 string? outputFile = ChooseGlbPath();
@@ -225,13 +176,13 @@ namespace CrossSlash {
                     return;
 
                 var exporter = new BattleModel(_source, GetOptions(scale));
-                string locationCode = _txtModel.Text?.ToString() ?? string.Empty;
+                string locationCode = _txtModel.Text;
                 var model = exporter.BuildSceneFromBattleLocation(locationCode);
                 model.SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
-                MessageBox.Query("Success", "Battlefield export succeeded", "OK");
+                DesktopUi.ShowInfo(this, "Success", "Battlefield export succeeded");
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Error", ex.Message, "OK");
+                DesktopUi.ShowError(this, "Error", ex.Message);
             }
         }
 
@@ -239,7 +190,7 @@ namespace CrossSlash {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
+                if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
                 var locationCodes = ModelBatchDiscovery.FindBattleLocations(_source);
@@ -249,7 +200,8 @@ namespace CrossSlash {
                 var preferences = PreferencesStore.Load();
                 string? outputDirectory = NativeFilePicker.OpenFolder(
                     "Choose a folder for all battlefield exports",
-                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
+                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                    this
                 );
                 if (outputDirectory == null)
                     return;
@@ -274,9 +226,9 @@ namespace CrossSlash {
                     if (failures.Count > 5)
                         result += "\n...";
                 }
-                MessageBox.Query("Export Battlefields", result, "OK");
+                DesktopUi.ShowInfo(this, "Export Battlefields", result);
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Error", ex.Message, "OK");
+                DesktopUi.ShowError(this, "Error", ex.Message);
             }
         }
 
@@ -284,7 +236,7 @@ namespace CrossSlash {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
+                if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
                 var modelCodes = _magicModels
@@ -296,7 +248,8 @@ namespace CrossSlash {
                 var preferences = PreferencesStore.Load();
                 string? outputDirectory = NativeFilePicker.OpenFolder(
                     _magicModels ? "Choose a folder for all summon animations" : "Choose a folder for all battle animations",
-                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
+                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                    this
                 );
                 if (outputDirectory == null)
                     return;
@@ -326,23 +279,24 @@ namespace CrossSlash {
                     if (failures.Count > 5)
                         result += "\n...";
                 }
-                MessageBox.Query("Export All Animations", result, "OK");
+                DesktopUi.ShowInfo(this, "Export All Animations", result);
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Error", ex.Message, "OK");
+                DesktopUi.ShowError(this, "Error", ex.Message);
             }
         }
 
         private string? ChooseGlbPath() {
             var preferences = PreferencesStore.Load();
             return NativeFilePicker.SaveGlb(
-                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
+                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                this
             );
         }
 
         private BattleModelOptions GetOptions(float scale) => new() {
-            ConvertSRGBToLinear = _chkSRGB.Checked,
-            SwapWinding = _chkSwapWinding.Checked,
-            BakeVertexColours = _chkBakeColours.Checked,
+            ConvertSRGBToLinear = _chkSRGB.IsChecked == true,
+            SwapWinding = _chkSwapWinding.IsChecked == true,
+            BakeVertexColours = _chkBakeColours.IsChecked == true,
             Scale = scale,
         };
 

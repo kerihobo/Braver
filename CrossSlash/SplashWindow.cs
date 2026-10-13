@@ -1,102 +1,124 @@
-﻿// This program and the accompanying materials are made available under the terms of the
-//  Eclipse Public License v2.0 which accompanies this distribution, and is available at
-//  https://www.eclipse.org/legal/epl-v20.html
+// This program and the accompanying materials are made available under the terms of the
+// Eclipse Public License v2.0 which accompanies this distribution, and is available at
+// https://www.eclipse.org/legal/epl-v20.html
 //
-//  SPDX-License-Identifier: EPL-2.0
+// SPDX-License-Identifier: EPL-2.0
 
 using Ficedula.FF7.Exporters;
-using System;
-using System.Linq;
-using Terminal.Gui;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 
 namespace CrossSlash {
-    public class SplashWindow : Window {
+    public sealed class SplashWindow : Window {
         private readonly CrossSlashPreferences _preferences;
+        private readonly Dictionary<string, SourceRow> _sourceRows = new(StringComparer.InvariantCultureIgnoreCase);
 
         public SplashWindow() {
             _preferences = PreferencesStore.Load();
+            var preferencesButton = DesktopUi.CreateButton("Preferences");
+            preferencesButton.Click += (_, _) => OpenPreferences();
 
-            Title = "CrossSlash FF7 exporter";
+            var content = new StackPanel();
+            content.Children.Add(DesktopUi.CreateSectionTitle("Choose an exporter"));
+            content.Children.Add(DesktopUi.CreateHint("Each exporter remembers its own source. Choose an LGP archive or a folder, then open the tool."));
 
-            var hint = new Label {
-                Text = "Choose a source for each exporter. The paths are remembered separately.",
-                Width = Dim.Fill(1),
-            };
-            var exporterHeader = new Label {
-                Text = "Export type",
-                Y = Pos.Bottom(hint) + 1,
-                Width = Dim.Percent(30),
-                TextAlignment = TextAlignment.Right,
-            };
-            var sourceHeader = new Label {
-                Text = "Source LGP or folder",
-                X = Pos.Percent(39),
-                Y = exporterHeader.Y,
-            };
+            var rows = new StackPanel();
+            foreach (var entry in ExportKind.Exporters.Where(e => e.Value.HasGui))
+                rows.Children.Add(CreateExporterRow(entry.Key, entry.Value));
+            content.Children.Add(rows);
 
-            Add(hint, exporterHeader, sourceHeader);
-
-            Pos y = Pos.Bottom(exporterHeader) + 1;
-            foreach (var entry in ExportKind.Exporters.Where(e => e.Value.HasGui)) {
-                string key = entry.Key;
-                ExportKind exporter = entry.Value;
-
-                string? savedPath = _preferences.GetExporterSourcePath(key);
-                var sourcePath = new Label {
-                    Text = string.IsNullOrWhiteSpace(savedPath) ? "(No source selected)" : savedPath,
-                    X = Pos.Percent(39),
-                    Y = y,
-                    Width = Dim.Percent(43),
-                };
-                var browse = new Button {
-                    Text = "Browse...",
-                    X = Pos.Right(sourcePath) + 1,
-                    Y = y,
-                    Width = Dim.Fill(1),
-                };
-                browse.Clicked += () => BrowseSource(key, sourcePath);
-
-                var exportName = new Label {
-                    Text = exporter.Name,
-                    Width = Dim.Percent(34),
-                    Y = y,
-                    CanFocus = true,
-                    TextAlignment = TextAlignment.Right,
-                };
-                exportName.Clicked += () => RunExporter(key, exporter, sourcePath);
-
-                Add(exportName, sourcePath, browse);
-                y = Pos.Bottom(exportName) + 1;
-            }
+            DesktopUi.ConfigureWindow(
+                this,
+                "CrossSlash",
+                "Final Fantasy VII asset exporter",
+                content,
+                headerAction: preferencesButton,
+                width: 1120,
+                height: 820
+            );
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
 
-        private void BrowseSource(string key, Label sourcePath) {
-            int choice = MessageBox.Query(
-                "Choose source type",
-                "Browse for an LGP archive or a source folder",
-                "LGP archive",
-                "Folder",
-                "Cancel"
-            );
+        private UIElement CreateExporterRow(string key, ExportKind exporter) {
+            var row = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(185) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            string? currentPath = sourcePath.Text?.ToString();
-            string? path = choice switch {
-                0 => NativeFilePicker.OpenLgp(currentPath),
-                1 => NativeFilePicker.OpenFolder("Choose the source folder", currentPath),
+            var name = new TextBlock {
+                Text = exporter.Name,
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(Color.FromRgb(23, 43, 77)),
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                TextAlignment = TextAlignment.Right,
+                Margin = new Thickness(0, 0, 14, 0),
+            };
+            string? savedPath = _preferences.GetExporterSourcePath(key);
+            var sourceType = new ComboBox {
+                ItemsSource = new[] { "LGP archive", "Folder" },
+                SelectedIndex = !string.IsNullOrWhiteSpace(savedPath) && Directory.Exists(savedPath) ? 1 : 0,
+                Padding = new Thickness(8, 6, 8, 6),
+                Margin = new Thickness(0, 0, 10, 0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+            };
+            var path = DesktopUi.CreateTextBox(savedPath, readOnly: true);
+            path.ToolTip = savedPath ?? "No source selected";
+            path.Margin = new Thickness(0, 0, 10, 0);
+
+            var browse = DesktopUi.CreateButton("Browse");
+            browse.Margin = new Thickness(0, 0, 10, 0);
+            browse.Click += (_, _) => BrowseSource(key, sourceType, path);
+
+            var open = DesktopUi.CreateButton("Open", primary: true);
+            open.Margin = new Thickness(0);
+            open.Click += (_, _) => RunExporter(key, exporter, path);
+            _sourceRows[key] = new SourceRow { Path = path };
+
+            row.Children.Add(name);
+            Grid.SetColumn(sourceType, 1);
+            row.Children.Add(sourceType);
+            Grid.SetColumn(path, 2);
+            row.Children.Add(path);
+            Grid.SetColumn(browse, 3);
+            row.Children.Add(browse);
+            Grid.SetColumn(open, 4);
+            row.Children.Add(open);
+
+            return new Border {
+                Background = new SolidColorBrush(Color.FromRgb(248, 250, 252)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(226, 232, 240)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14),
+                Child = row,
+            };
+        }
+
+        private void BrowseSource(string key, ComboBox sourceType, TextBox sourcePath) {
+            string? currentPath = sourcePath.Text;
+            string? path = sourceType.SelectedIndex switch {
+                0 => NativeFilePicker.OpenLgp(currentPath, this),
+                1 => NativeFilePicker.OpenFolder("Choose the source folder", currentPath, this),
                 _ => null,
             };
-
             if (path == null)
                 return;
 
             sourcePath.Text = path;
+            sourcePath.ToolTip = path;
             RememberSourcePath(key, path);
         }
 
-        private void RunExporter(string key, ExportKind exporter, Label sourcePath) {
-            string? path = sourcePath.Text?.ToString();
-            if (string.IsNullOrWhiteSpace(path) || path == "(No source selected)") {
-                MessageBox.ErrorQuery("Source required", "Browse for a source LGP archive or folder.", "OK");
+        private void RunExporter(string key, ExportKind exporter, TextBox sourcePath) {
+            string path = sourcePath.Text;
+            if (string.IsNullOrWhiteSpace(path) || (!File.Exists(path) && !Directory.Exists(path))) {
+                DesktopUi.ShowError(this, "Source required", "Choose an existing LGP archive or source folder first.");
                 return;
             }
 
@@ -104,16 +126,39 @@ namespace CrossSlash {
             try {
                 source = DataSource.Create(path);
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Could not open source", ex.Message, "OK");
+                DesktopUi.ShowError(this, "Could not open source", ex.Message);
                 return;
             }
 
             RememberSourcePath(key, path);
             try {
-                Application.Run(exporter.ExecuteGui(source));
+                Window window = exporter.ExecuteGui(source);
+                window.Owner = this;
+                window.ShowDialog();
             } finally {
                 if (source is IDisposable disposable)
                     disposable.Dispose();
+            }
+        }
+
+        private void OpenPreferences() {
+            string? previousDefault = _preferences.DefaultSourcePath;
+            var window = new PreferencesWindow(previousDefault) { Owner = this };
+            if (window.ShowDialog() != true)
+                return;
+
+            _preferences.DefaultSourcePath = window.DefaultSourcePath;
+            try {
+                PreferencesStore.Save(_preferences);
+            } catch (Exception ex) {
+                DesktopUi.ShowError(this, "Preferences", $"Could not save preferences: {ex.Message}");
+            }
+
+            foreach (var row in _sourceRows.Values) {
+                if (string.IsNullOrWhiteSpace(row.Path.Text) || row.Path.Text == previousDefault) {
+                    row.Path.Text = _preferences.DefaultSourcePath ?? string.Empty;
+                    row.Path.ToolTip = row.Path.Text;
+                }
             }
         }
 
@@ -122,8 +167,12 @@ namespace CrossSlash {
             try {
                 PreferencesStore.Save(_preferences);
             } catch (Exception ex) {
-                MessageBox.ErrorQuery("Preferences", $"Could not save preferences: {ex.Message}", "OK");
+                DesktopUi.ShowError(this, "Preferences", $"Could not save source path: {ex.Message}");
             }
+        }
+
+        private sealed class SourceRow {
+            public TextBox Path { get; init; } = null!;
         }
     }
 }

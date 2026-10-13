@@ -6,7 +6,7 @@
 
 using Ficedula.FF7.Exporters;
 using System.Linq;
-using Terminal.Gui;
+using System.Windows;
 
 namespace CrossSlash {
     public class MagicExport : ExportKind {
