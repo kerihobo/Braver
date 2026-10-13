@@ -86,7 +86,7 @@ namespace CrossSlash {
             content.Children.Add(destinationRow);
             content.Children.Add(DesktopUi.CreateActionRow(export));
 
-            DesktopUi.ConfigureWindow(this, "Audio exporter", "Extract Final Fantasy VII sound effects as WAV files", content, back: Close);
+            DesktopUi.ConfigureWindow(this, "Audio exporter", "Extract Final Fantasy VII sound effects as WAV files", content);
         }
 
         private void BrowseDestination() {

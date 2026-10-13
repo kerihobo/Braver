@@ -120,7 +120,8 @@ namespace CrossSlash {
                 magicModels ? "Magic model exporter" : "Battle model exporter",
                 magicModels ? "Export summon models and their animations" : "Choose a tab to export battle models or battlefield skeletons",
                 content,
-                back: Close
+            width: 1120,
+            height: 820
             );
         }
 

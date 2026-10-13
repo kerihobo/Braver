@@ -98,7 +98,7 @@ namespace CrossSlash {
             content.Children.Add(destinationRow);
             content.Children.Add(DesktopUi.CreateActionRow(extract));
 
-            DesktopUi.ConfigureWindow(this, "LGP extractor", "Browse archive contents and extract selected files", content, back: Close);
+            DesktopUi.ConfigureWindow(this, "LGP extractor", "Browse archive contents and extract selected files", content);
         }
 
         private void BrowseDestination() {

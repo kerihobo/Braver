@@ -13,7 +13,6 @@ using System.Windows.Media;
 namespace CrossSlash {
     internal static class DesktopUi {
         public static Window? MainWindow { get; set; }
-        public static Action? BackNavigation { get; set; }
 
         private static readonly Brush PageBackground = Brush("#F3F6FA");
         private static readonly Brush HeaderBackground = Brush("#172B4D");
@@ -30,10 +29,10 @@ namespace CrossSlash {
             string title,
             string subtitle,
             UIElement content,
-            Action? back = null,
             UIElement? headerAction = null,
             double width = 1040,
-            double height = 760) {
+            double height = 760,
+            bool scrollContent = true) {
             window.Title = title;
             window.Width = width;
             window.Height = height;
@@ -53,16 +52,6 @@ namespace CrossSlash {
                 Padding = new Thickness(24, 20, 24, 20),
             };
             var headerLayout = new DockPanel { LastChildFill = true };
-            if (back != null) {
-                var backButton = CreateButton("Back");
-                backButton.Background = Brush("#2B4163");
-                backButton.Foreground = Brushes.White;
-                backButton.BorderBrush = Brush("#536986");
-                backButton.Margin = new Thickness(0, 0, 20, 0);
-                backButton.Click += (_, _) => RequestBack(window, back);
-                DockPanel.SetDock(backButton, Dock.Left);
-                headerLayout.Children.Add(backButton);
-            }
             if (headerAction != null) {
                 DockPanel.SetDock(headerAction, Dock.Right);
                 headerLayout.Children.Add(headerAction);
@@ -85,14 +74,16 @@ namespace CrossSlash {
             header.Child = headerLayout;
             root.Children.Add(header);
 
-            var scroll = new ScrollViewer {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                Padding = new Thickness(24),
-                Content = CreateCard(content),
-            };
-            Grid.SetRow(scroll, 1);
-            root.Children.Add(scroll);
+            UIElement body = scrollContent
+                ? new ScrollViewer {
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    Padding = new Thickness(24),
+                    Content = CreateCard(content),
+                }
+                : CreateCard(content);
+            Grid.SetRow(body, 1);
+            root.Children.Add(body);
             window.Content = root;
         }
 
@@ -194,14 +185,6 @@ namespace CrossSlash {
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 4, 0, 12),
         };
-
-        public static void RequestBack(Window screen, Action? fallback = null) {
-            if (MainWindow != null && !ReferenceEquals(MainWindow, screen) && BackNavigation != null) {
-                BackNavigation();
-                return;
-            }
-            fallback?.Invoke();
-        }
 
         public static Window ResolveOwner(Window requestedOwner) => MainWindow ?? requestedOwner;
 
