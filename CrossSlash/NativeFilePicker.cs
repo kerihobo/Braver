@@ -68,7 +68,7 @@ namespace CrossSlash {
         public static string? SaveGlb(string? currentPath) {
             var dialog = (IFileSaveDialog)new FileSaveDialogCom();
             try {
-                dialog.SetTitle("Save GLB As");
+                dialog.SetTitle("Export GLB");
                 dialog.SetFileTypes(1, new[] {
                     new FilterSpec("glTF binary (*.glb)", "*.glb"),
                 });

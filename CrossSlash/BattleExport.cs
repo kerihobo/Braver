@@ -41,11 +41,9 @@ namespace CrossSlash {
     }
 
     public class BattleExportWindow : Window {
-        private Label _lblGLB;
-        private string _glbFile;
         private DataSource _source;
         private bool _magicModels;
-        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkSeparateAnimations;
+        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
         private TextField _txtModel, _txtScale;
 
         public BattleExportWindow(DataSource source, bool magicModels = false) {
@@ -90,45 +88,33 @@ namespace CrossSlash {
                 Text = "Bake Vertex Colours to texture",
                 Y = Pos.Bottom(_chkSwapWinding),
             };
-            _chkSeparateAnimations = new CheckBox {
-                Checked = false,
-                Text = "Export animations to Animations folder",
-                Y = Pos.Bottom(_chkBakeColours),
-            };
-
             var btnGLB = new Button {
-                Text = "Save GLB As",
-                Width = Dim.Percent(25),
-                Y = Pos.Bottom(_chkSeparateAnimations) + 1,
-            };
-            btnGLB.Clicked += BtnGLB_Clicked;
-
-            _lblGLB = new Label {
-                X = Pos.Right(btnGLB) + 1,
-                Y = btnGLB.Y,
-                Text = "(No file selected)",
-            };
-
-            var btnExport = new Button {
-                Y = Pos.Bottom(btnGLB) + 1,
+                Text = "Export",
                 Width = Dim.Percent(50),
-                Text = "Export"
+                Y = Pos.Bottom(_chkBakeColours) + 1,
             };
-            btnExport.Clicked += BtnExport_Clicked;
+            btnGLB.Clicked += BtnExport_Clicked;
 
             var btnExportAll = new Button {
-                X = Pos.Right(btnExport) + 1,
-                Y = btnExport.Y,
+                X = Pos.Right(btnGLB) + 1,
+                Y = btnGLB.Y,
                 Width = Dim.Fill(1),
                 Text = magicModels ? "Export All Summons" : "Export All Battle Models",
             };
             btnExportAll.Clicked += BtnExportAll_Clicked;
 
+            var btnExportAllAnimations = new Button {
+                Y = Pos.Bottom(btnExportAll) + 1,
+                Width = Dim.Fill(1),
+                Text = "Export All Animations",
+            };
+            btnExportAllAnimations.Clicked += BtnExportAllAnimations_Clicked;
+
             Button? btnExportBattlefield = null;
             Button? btnExportAllBattlefields = null;
             if (!_magicModels) {
                 btnExportBattlefield = new Button {
-                    Y = Pos.Bottom(btnExportAll) + 1,
+                    Y = Pos.Bottom(btnExportAllAnimations) + 1,
                     Width = Dim.Percent(50),
                     Text = "Export Battlefield",
                 };
@@ -143,52 +129,36 @@ namespace CrossSlash {
                 btnExportAllBattlefields.Clicked += BtnExportAllBattlefields_Clicked;
             }
 
-            View lastAction = btnExportAllBattlefields ?? (View)btnExportAll;
+            View lastAction = btnExportAllBattlefields ?? (View)btnExportAllAnimations;
             var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(lastAction) + 1);
 
             Add(lblModel, _txtModel, lblScale, _txtScale, 
-                _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkSeparateAnimations,
-                btnGLB, _lblGLB, btnExport, btnExportAll);
+                _chkSRGB, _chkSwapWinding, _chkBakeColours,
+                btnGLB, btnExportAll, btnExportAllAnimations);
             if (btnExportBattlefield != null && btnExportAllBattlefields != null)
                 Add(btnExportBattlefield, btnExportAllBattlefields);
             Add(btnBack);
-        }
-
-        private void BtnGLB_Clicked() {
-            var preferences = PreferencesStore.Load();
-            string? path = NativeFilePicker.SaveGlb(
-                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath ?? _glbFile
-            );
-            if (path != null) {
-                _lblGLB.Text = _glbFile = path;
-                PreferencesStore.RememberOutputPath(path);
-            }
         }
 
         private void BtnExport_Clicked() {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (string.IsNullOrEmpty(_glbFile))
-                    throw new Exception("No GLB save as filename selected");
                 if (string.IsNullOrWhiteSpace(_txtModel.Text.ToString()))
                     throw new Exception("No model file selected");
                 if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
                     throw new Exception("No scale specified");
 
+                string? outputFile = ChooseGlbPath();
+                if (outputFile == null)
+                    return;
+
                 var options = GetOptions(scale);
                 string modelCode = _txtModel.Text?.ToString() ?? string.Empty;
-                string? animationFile = ExportModel(
-                    modelCode,
-                    _glbFile,
-                    options,
-                    _chkSeparateAnimations.Checked
-                );
-
-                string message = "Export Succeeded";
-                if (animationFile != null)
-                    message += $"\nAnimations saved to:\n{animationFile}";
-                MessageBox.Query("Success", message, "OK");
+                var exporter = new BattleModel(_source, options);
+                exporter.BuildSceneAuto(modelCode).SaveGLB(outputFile);
+                PreferencesStore.RememberOutputPath(outputFile);
+                MessageBox.Query("Success", "Export succeeded", "OK");
             } catch (Exception ex) {
                 MessageBox.ErrorQuery("Error", ex.Message, "OK");
             }
@@ -219,18 +189,11 @@ namespace CrossSlash {
                 PreferencesStore.RememberOutputDirectory(outputDirectory);
 
                 int exported = 0;
-                int animationsExported = 0;
                 var failures = new List<string>();
                 foreach (string code in modelCodes) {
                     try {
-                        string? animationFile = ExportModel(
-                            code,
-                            Path.Combine(outputDirectory, code + ".glb"),
-                            GetOptions(scale),
-                            _chkSeparateAnimations.Checked
-                        );
-                        if (animationFile != null)
-                            animationsExported++;
+                        var exporter = new BattleModel(_source, GetOptions(scale));
+                        exporter.BuildSceneAuto(code).SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
                         exported++;
                     } catch (Exception ex) {
                         failures.Add($"{code}: {ex.Message}");
@@ -238,8 +201,6 @@ namespace CrossSlash {
                 }
 
                 string result = $"Exported {exported} of {modelCodes.Count} models to:\n{outputDirectory}";
-                if (_chkSeparateAnimations.Checked)
-                    result += $"\nSeparate animation files: {animationsExported}";
                 if (failures.Count > 0) {
                     result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
                     if (failures.Count > 5)
@@ -255,15 +216,18 @@ namespace CrossSlash {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (string.IsNullOrEmpty(_glbFile))
-                    throw new Exception("No GLB save as filename selected");
                 if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
                     throw new Exception("No scale specified");
+
+                string? outputFile = ChooseGlbPath();
+                if (outputFile == null)
+                    return;
 
                 var exporter = new BattleModel(_source, GetOptions(scale));
                 string locationCode = _txtModel.Text?.ToString() ?? string.Empty;
                 var model = exporter.BuildSceneFromBattleLocation(locationCode);
-                model.SaveGLB(_glbFile);
+                model.SaveGLB(outputFile);
+                PreferencesStore.RememberOutputPath(outputFile);
                 MessageBox.Query("Success", "Battlefield export succeeded", "OK");
             } catch (Exception ex) {
                 MessageBox.ErrorQuery("Error", ex.Message, "OK");
@@ -315,6 +279,65 @@ namespace CrossSlash {
             }
         }
 
+        private void BtnExportAllAnimations_Clicked() {
+            try {
+                if (_source == null)
+                    throw new Exception("No data source selected");
+                if (!float.TryParse(_txtScale.Text.ToString(), out float scale))
+                    throw new Exception("No scale specified");
+
+                var modelCodes = _magicModels
+                    ? ModelBatchDiscovery.FindMagicModels(_source)
+                    : ModelBatchDiscovery.FindBattleModels(_source);
+                if (modelCodes.Count == 0)
+                    throw new Exception("No models were found in the selected source.");
+
+                var preferences = PreferencesStore.Load();
+                string? outputDirectory = NativeFilePicker.OpenFolder(
+                    _magicModels ? "Choose a folder for all summon animations" : "Choose a folder for all battle animations",
+                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
+                );
+                if (outputDirectory == null)
+                    return;
+                PreferencesStore.RememberOutputDirectory(outputDirectory);
+
+                int exported = 0;
+                int animationCount = 0;
+                var failures = new List<string>();
+                foreach (string code in modelCodes) {
+                    try {
+                        var exporter = new BattleModel(_source, GetOptions(scale));
+                        var model = exporter.BuildSceneAuto(code, includeMeshes: false, includeAnimations: true);
+                        string outputFile = Path.Combine(outputDirectory, code, "Animations.glb");
+                        Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
+                        model.SaveGLB(outputFile);
+                        animationCount += model.LogicalAnimations.Count;
+                        exported++;
+                    } catch (Exception ex) {
+                        failures.Add($"{code}: {ex.Message}");
+                    }
+                }
+
+                string result = $"Exported animations for {exported} of {modelCodes.Count} models to:\n{outputDirectory}\n" +
+                    $"Animation clips: {animationCount}";
+                if (failures.Count > 0) {
+                    result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
+                    if (failures.Count > 5)
+                        result += "\n...";
+                }
+                MessageBox.Query("Export All Animations", result, "OK");
+            } catch (Exception ex) {
+                MessageBox.ErrorQuery("Error", ex.Message, "OK");
+            }
+        }
+
+        private string? ChooseGlbPath() {
+            var preferences = PreferencesStore.Load();
+            return NativeFilePicker.SaveGlb(
+                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
+            );
+        }
+
         private BattleModelOptions GetOptions(float scale) => new() {
             ConvertSRGBToLinear = _chkSRGB.Checked,
             SwapWinding = _chkSwapWinding.Checked,
@@ -322,30 +345,6 @@ namespace CrossSlash {
             Scale = scale,
         };
 
-        private string? ExportModel(string modelCode, string modelFile, BattleModelOptions options, bool separateAnimations) {
-            if (!separateAnimations || BattleModel.IsBattleLocation(_source, modelCode)) {
-                var exporter = new BattleModel(_source, options);
-                exporter.BuildSceneAuto(modelCode).SaveGLB(modelFile);
-                return null;
-            }
-
-            string animationFile = GetAnimationOutputPath(modelFile);
-            Directory.CreateDirectory(Path.GetDirectoryName(animationFile)!);
-
-            var modelExporter = new BattleModel(_source, options);
-            modelExporter.BuildSceneAuto(modelCode, includeMeshes: true, includeAnimations: false).SaveGLB(modelFile);
-
-            var animationExporter = new BattleModel(_source, options);
-            animationExporter.BuildSceneAuto(modelCode, includeMeshes: false, includeAnimations: true).SaveGLB(animationFile);
-            return animationFile;
-        }
-
-        private static string GetAnimationOutputPath(string modelFile) => Path.Combine(
-            Path.GetDirectoryName(modelFile) ?? string.Empty,
-            "Animations",
-            Path.GetFileNameWithoutExtension(modelFile),
-            "Animations.glb"
-        );
     }
 
     internal static class ModelBatchDiscovery {

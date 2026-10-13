@@ -53,13 +53,11 @@ namespace CrossSlash {
 
     public class FieldExportWindow : Window {
 
-        private Label _lblGLB;
         private ListView _lvHRCs;
         private TextView _txtAnims;
         private List<string> _hrcFiles;
-        private CheckBox _chkAllCompatible, _chkSeparateAnimations, _chkSRGB, _chkSwapWinding, _chkBakeColours;
+        private CheckBox _chkAllCompatible, _chkSRGB, _chkSwapWinding, _chkBakeColours;
 
-        private string _glbFile;
         private DataSource _source;
 
         public FieldExportWindow(DataSource source) {
@@ -99,16 +97,11 @@ namespace CrossSlash {
             _txtAnims.Enabled = false;
             // Toggled supplies the previous state, so read Checked after the change.
             _chkAllCompatible.Toggled += _ => _txtAnims.Enabled = !_chkAllCompatible.Checked;
-            _chkSeparateAnimations = new CheckBox {
-                Checked = false,
-                Text = "Export animations to Animations folder",
-                Y = Pos.Bottom(_chkAllCompatible) + 1,
-            };
 
             _chkSRGB = new CheckBox {
                 Checked = true,
                 Text = "Convert colours from SRGB->Linear",
-                Y = Pos.Bottom(_chkSeparateAnimations) + 1,
+                Y = Pos.Bottom(_chkAllCompatible) + 1,
             };
             _chkSwapWinding = new CheckBox {
                 Checked = false,
@@ -122,34 +115,28 @@ namespace CrossSlash {
             };
 
             var btnGLB = new Button {
-                Text = "Save GLB As",
-                Width = Dim.Percent(25),
+                Text = "Export",
+                Width = Dim.Percent(50),
                 Y = Pos.Bottom(_chkBakeColours) + 1,
             };
-            btnGLB.Clicked += BtnGLB_Clicked;
-
-            _lblGLB = new Label {
-                X = Pos.Right(btnGLB) + 1,
-                Y = btnGLB.Y,
-                Text = "(No file selected)",
-            };
-
-            var btnExport = new Button {
-                Y = Pos.Bottom(btnGLB) + 1,
-                Width = Dim.Percent(50),
-                Text = "Export"
-            };
-            btnExport.Clicked += BtnExport_Clicked;
+            btnGLB.Clicked += BtnExport_Clicked;
 
             var btnExportAll = new Button {
-                X = Pos.Right(btnExport) + 1,
-                Y = btnExport.Y,
+                X = Pos.Right(btnGLB) + 1,
+                Y = btnGLB.Y,
                 Width = Dim.Fill(1),
                 Text = "Export All",
             };
             btnExportAll.Clicked += BtnExportAll_Clicked;
 
-            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(btnExportAll) + 1);
+            var btnExportAllAnimations = new Button {
+                Y = Pos.Bottom(btnExportAll) + 1,
+                Width = Dim.Fill(1),
+                Text = "Export All Animations",
+            };
+            btnExportAllAnimations.Clicked += BtnExportAllAnimations_Clicked;
+
+            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(btnExportAllAnimations) + 1);
 
             _hrcFiles = _source.AllFiles
                 .Where(s => Path.GetExtension(s).Equals(".hrc", StringComparison.InvariantCultureIgnoreCase))
@@ -158,9 +145,9 @@ namespace CrossSlash {
 
 
             Add(lblHRC, _lvHRCs, lblAnims, _txtAnims, 
-                _chkAllCompatible, _chkSeparateAnimations,
+                _chkAllCompatible,
                 _chkSRGB, _chkSwapWinding, _chkBakeColours,
-                btnGLB, _lblGLB, btnExport, btnExportAll, btnBack);
+                btnGLB, btnExportAll, btnExportAllAnimations, btnBack);
         }
 
         private void BtnExport_Clicked() {
@@ -173,12 +160,14 @@ namespace CrossSlash {
 
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (string.IsNullOrEmpty(_glbFile))
-                    throw new Exception("No GLB save as filename selected");
                 if (_lvHRCs.SelectedItem < 0)
                     throw new Exception("No HRC file selected");
                 if (!_chkAllCompatible.Checked && !anims.Any())
                     throw new Exception("No animations specified");
+
+                string? outputFile = ChooseGlbPath();
+                if (outputFile == null)
+                    return;
 
                 var options = new ModelBaseOptions {
                     ConvertSRGBToLinear = _chkSRGB.Checked,
@@ -198,20 +187,19 @@ namespace CrossSlash {
                     animationFiles = anims;
                 }
 
-                var usedAnimations = ExportModel(
+                var exporter = new FieldModel(_source, options);
+                var model = exporter.BuildScene(
                     _hrcFiles[_lvHRCs.SelectedItem],
                     animationFiles.ToList(),
                     compatibleAnimationsOnly,
-                    _glbFile,
-                    options,
-                    _chkSeparateAnimations.Checked
+                    out var usedAnimations
                 );
+                model.SaveGLB(outputFile);
+                PreferencesStore.RememberOutputPath(outputFile);
 
                 string successMessage = "Export Succeeded";
                 if (_chkAllCompatible.Checked)
                     successMessage += $"\nCompatible animations: {usedAnimations.Count}";
-                if (_chkSeparateAnimations.Checked)
-                    successMessage += $"\nAnimations saved to:\n{GetAnimationOutputPath(_glbFile)}";
                 MessageBox.Query("Success", successMessage, "OK");
             } catch (Exception ex) {
                 MessageBox.ErrorQuery("Error", ex.Message, "OK");
@@ -247,7 +235,6 @@ namespace CrossSlash {
                 int exported = 0;
                 int compatibleAnimationCount = 0;
                 int modelsWithoutAnimations = 0;
-                int separateAnimationFiles = 0;
                 var failures = new List<string>();
                 foreach (string hrcFile in _hrcFiles) {
                     try {
@@ -255,17 +242,15 @@ namespace CrossSlash {
                             outputDirectory,
                             Path.GetFileNameWithoutExtension(hrcFile) + ".glb"
                         );
-                        var usedAnimations = ExportModel(
+                        var exporter = new FieldModel(_source, options);
+                        var model = exporter.BuildScene(
                             hrcFile,
                             animationFiles,
                             compatibleAnimationsOnly: true,
-                            outputFile,
-                            options,
-                            _chkSeparateAnimations.Checked
+                            out var usedAnimations
                         );
+                        model.SaveGLB(outputFile);
                         exported++;
-                        if (_chkSeparateAnimations.Checked)
-                            separateAnimationFiles++;
                         compatibleAnimationCount += usedAnimations.Count;
                         if (usedAnimations.Count == 0)
                             modelsWithoutAnimations++;
@@ -277,8 +262,6 @@ namespace CrossSlash {
                 string result = $"Exported {exported} of {_hrcFiles.Count} field models to:\n{outputDirectory}\n\n" +
                     $"Compatible animation clips: {compatibleAnimationCount}\n" +
                     $"Models without compatible animations: {modelsWithoutAnimations}";
-                if (_chkSeparateAnimations.Checked)
-                    result += $"\nAnimation-only files: {separateAnimationFiles}";
                 if (failures.Count > 0) {
                     result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
                     if (failures.Count > 5)
@@ -290,59 +273,86 @@ namespace CrossSlash {
             }
         }
 
-        private void BtnGLB_Clicked() {
-            var preferences = PreferencesStore.Load();
-            string? path = NativeFilePicker.SaveGlb(
-                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath ?? _glbFile
-            );
-            if (path != null) {
-                _lblGLB.Text = _glbFile = path;
-                PreferencesStore.RememberOutputPath(path);
+        private void BtnExportAllAnimations_Clicked() {
+            try {
+                if (_source == null)
+                    throw new Exception("No data source selected");
+                if (_hrcFiles.Count == 0)
+                    throw new Exception("No HRC field models were found in the selected source.");
+
+                var preferences = PreferencesStore.Load();
+                string? outputDirectory = NativeFilePicker.OpenFolder(
+                    "Choose a folder for all field animations",
+                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
+                );
+                if (outputDirectory == null)
+                    return;
+                PreferencesStore.RememberOutputDirectory(outputDirectory);
+
+                var animationFiles = _source.AllFiles
+                    .Where(file => Path.GetExtension(file).Equals(".a", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var options = new ModelBaseOptions {
+                    ConvertSRGBToLinear = _chkSRGB.Checked,
+                    SwapWinding = _chkSwapWinding.Checked,
+                    BakeVertexColours = _chkBakeColours.Checked,
+                };
+
+                int exported = 0;
+                int compatibleAnimationCount = 0;
+                int modelsWithoutAnimations = 0;
+                var failures = new List<string>();
+                foreach (string hrcFile in _hrcFiles) {
+                    try {
+                        var exporter = new FieldModel(_source, options);
+                        var model = exporter.BuildScene(
+                            hrcFile,
+                            animationFiles,
+                            compatibleAnimationsOnly: true,
+                            out var usedAnimations,
+                            includeMeshes: false,
+                            includeAnimations: true
+                        );
+                        compatibleAnimationCount += usedAnimations.Count;
+                        if (usedAnimations.Count == 0) {
+                            modelsWithoutAnimations++;
+                            continue;
+                        }
+
+                        string outputFile = Path.Combine(
+                            outputDirectory,
+                            Path.GetFileNameWithoutExtension(hrcFile),
+                            "Animations.glb"
+                        );
+                        Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
+                        model.SaveGLB(outputFile);
+                        exported++;
+                    } catch (Exception ex) {
+                        failures.Add($"{hrcFile}: {ex.Message}");
+                    }
+                }
+
+                string result = $"Exported animations for {exported} field models to:\n{outputDirectory}\n\n" +
+                    $"Compatible animation clips: {compatibleAnimationCount}\n" +
+                    $"Models without compatible animations: {modelsWithoutAnimations}";
+                if (failures.Count > 0) {
+                    result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
+                    if (failures.Count > 5)
+                        result += "\n...";
+                }
+                MessageBox.Query("Export All Animations", result, "OK");
+            } catch (Exception ex) {
+                MessageBox.ErrorQuery("Error", ex.Message, "OK");
             }
         }
 
-        private IReadOnlyList<string> ExportModel(
-            string hrcFile,
-            IReadOnlyList<string> animationFiles,
-            bool compatibleAnimationsOnly,
-            string modelFile,
-            ModelBaseOptions options,
-            bool separateAnimations) {
-            var modelExporter = new FieldModel(_source, options);
-            var model = modelExporter.BuildScene(
-                hrcFile,
-                animationFiles,
-                compatibleAnimationsOnly,
-                out var usedAnimations,
-                includeMeshes: true,
-                includeAnimations: !separateAnimations
+        private string? ChooseGlbPath() {
+            var preferences = PreferencesStore.Load();
+            return NativeFilePicker.SaveGlb(
+                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath
             );
-            model.SaveGLB(modelFile);
-
-            if (!separateAnimations)
-                return usedAnimations;
-
-            var animationExporter = new FieldModel(_source, options);
-            var animationModel = animationExporter.BuildScene(
-                hrcFile,
-                animationFiles,
-                compatibleAnimationsOnly,
-                out usedAnimations,
-                includeMeshes: false,
-                includeAnimations: true
-            );
-            string animationFile = GetAnimationOutputPath(modelFile);
-            Directory.CreateDirectory(Path.GetDirectoryName(animationFile)!);
-            animationModel.SaveGLB(animationFile);
-            return usedAnimations;
         }
-
-        private static string GetAnimationOutputPath(string modelFile) => Path.Combine(
-            Path.GetDirectoryName(modelFile) ?? string.Empty,
-            "Animations",
-            Path.GetFileNameWithoutExtension(modelFile),
-            "Animations.glb"
-        );
 
     }
 }
