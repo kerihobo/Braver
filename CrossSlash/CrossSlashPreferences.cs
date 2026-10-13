@@ -8,14 +8,13 @@ using System.Text.Json;
 
 namespace CrossSlash {
     internal sealed class CrossSlashPreferences {
-        public string? DefaultSourcePath { get; set; }
         public Dictionary<string, string> ExporterSourcePaths { get; set; } = new(StringComparer.InvariantCultureIgnoreCase);
         public string? LastOutputDirectory { get; set; }
         public string? LastExtractDirectory { get; set; }
 
         public string? GetExporterSourcePath(string exporterKey) {
             ExporterSourcePaths ??= new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
-            return ExporterSourcePaths.TryGetValue(exporterKey, out string? path) ? path : DefaultSourcePath;
+            return ExporterSourcePaths.TryGetValue(exporterKey, out string? path) ? path : null;
         }
 
         public void RememberExporterSourcePath(string exporterKey, string path) {

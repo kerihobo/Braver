@@ -13,7 +13,6 @@ using System.Windows.Media;
 namespace CrossSlash {
     public sealed class SplashWindow : Window {
         private readonly CrossSlashPreferences _preferences;
-        private readonly Dictionary<string, SourceRow> _sourceRows = new(StringComparer.InvariantCultureIgnoreCase);
         private UIElement? _homeContent;
         private DataSource? _activeSource;
 
@@ -26,8 +25,6 @@ namespace CrossSlash {
                 DesktopUi.MainWindow = null;
             };
             _preferences = PreferencesStore.Load();
-            var preferencesButton = DesktopUi.CreateButton("Preferences");
-            preferencesButton.Click += (_, _) => OpenPreferences();
 
             var content = new StackPanel();
             content.Children.Add(DesktopUi.CreateSectionTitle("Choose an exporter"));
@@ -43,7 +40,6 @@ namespace CrossSlash {
                 "CrossSlash",
                 "Final Fantasy VII asset exporter",
                 content,
-                headerAction: preferencesButton,
                 width: 1120,
                 height: 820
             );
@@ -88,7 +84,6 @@ namespace CrossSlash {
             var open = DesktopUi.CreateButton("Open", primary: true);
             open.Margin = new Thickness(0);
             open.Click += (_, _) => RunExporter(key, exporter, path);
-            _sourceRows[key] = new SourceRow { Path = path, SourceType = sourceType };
 
             row.Children.Add(name);
             Grid.SetColumn(sourceType, 1);
@@ -153,30 +148,6 @@ namespace CrossSlash {
             }
         }
 
-        private void OpenPreferences() {
-            var screen = new PreferencesWindow(_preferences.DefaultSourcePath);
-            screen.Saved += SavePreferences;
-            ShowScreen(screen);
-        }
-
-        private void SavePreferences(string? defaultSourcePath) {
-            string? previousDefault = _preferences.DefaultSourcePath;
-            _preferences.DefaultSourcePath = defaultSourcePath;
-            try {
-                PreferencesStore.Save(_preferences);
-            } catch (Exception ex) {
-                DesktopUi.ShowError(this, "Preferences", $"Could not save preferences: {ex.Message}");
-            }
-
-            foreach (var row in _sourceRows.Values) {
-                if (string.IsNullOrWhiteSpace(row.Path.Text) || row.Path.Text == previousDefault) {
-                    row.Path.Text = _preferences.DefaultSourcePath ?? string.Empty;
-                    row.Path.ToolTip = row.Path.Text;
-                    row.SourceType.SelectedIndex = !string.IsNullOrWhiteSpace(row.Path.Text) && Directory.Exists(row.Path.Text) ? 1 : 0;
-                }
-            }
-        }
-
         private void ShowScreen(Window screen) {
             if (screen.Content is not UIElement content)
                 throw new InvalidOperationException("The exporter screen has no content to display.");
@@ -205,9 +176,5 @@ namespace CrossSlash {
             }
         }
 
-        private sealed class SourceRow {
-            public TextBox Path { get; init; } = null!;
-            public ComboBox SourceType { get; init; } = null!;
-        }
     }
 }

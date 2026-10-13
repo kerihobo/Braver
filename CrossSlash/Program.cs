@@ -19,8 +19,12 @@ internal static class Program {
             System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
 
         if (args.Length == 0) {
-            var app = new Application();
-            app.Run(new SplashWindow());
+            var app = new Application {
+                ShutdownMode = ShutdownMode.OnMainWindowClose,
+            };
+            var mainWindow = new SplashWindow();
+            app.MainWindow = mainWindow;
+            app.Run(mainWindow);
             return;
         }
 

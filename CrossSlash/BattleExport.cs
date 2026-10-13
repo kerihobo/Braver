@@ -213,7 +213,7 @@ namespace CrossSlash {
                 var preferences = PreferencesStore.Load();
                 string? outputDirectory = NativeFilePicker.OpenFolder(
                     _magicModels ? "Choose a folder for all magic model exports" : "Choose a folder for all battle model exports",
-                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                    preferences.LastOutputDirectory,
                     this
                 );
                 if (outputDirectory == null)
@@ -282,7 +282,7 @@ namespace CrossSlash {
                 var preferences = PreferencesStore.Load();
                 string? outputDirectory = NativeFilePicker.OpenFolder(
                     "Choose a folder for all battlefield exports",
-                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                    preferences.LastOutputDirectory,
                     this
                 );
                 if (outputDirectory == null)
@@ -330,7 +330,7 @@ namespace CrossSlash {
                 var preferences = PreferencesStore.Load();
                 string? outputDirectory = NativeFilePicker.OpenFolder(
                     _magicModels ? "Choose a folder for all summon animations" : "Choose a folder for all battle animations",
-                    preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                    preferences.LastOutputDirectory,
                     this
                 );
                 if (outputDirectory == null)
@@ -370,7 +370,7 @@ namespace CrossSlash {
         private string? ChooseGlbPath() {
             var preferences = PreferencesStore.Load();
             return NativeFilePicker.SaveGlb(
-                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                preferences.LastOutputDirectory,
                 this
             );
         }

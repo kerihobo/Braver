@@ -93,7 +93,7 @@ namespace CrossSlash {
             var preferences = PreferencesStore.Load();
             string? path = NativeFilePicker.OpenFolder(
                 "Choose the folder to extract to",
-                preferences.LastExtractDirectory ?? preferences.DefaultSourcePath,
+                preferences.LastExtractDirectory,
                 this
             );
             if (path == null)

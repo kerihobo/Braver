@@ -248,7 +248,7 @@ namespace CrossSlash {
             var preferences = PreferencesStore.Load();
             string? path = NativeFilePicker.OpenFolder(
                 title,
-                preferences.LastOutputDirectory ?? preferences.DefaultSourcePath,
+                preferences.LastOutputDirectory,
                 this
             );
             if (path != null)
@@ -258,7 +258,7 @@ namespace CrossSlash {
 
         private string? ChooseGlbPath() {
             var preferences = PreferencesStore.Load();
-            return NativeFilePicker.SaveGlb(preferences.LastOutputDirectory ?? preferences.DefaultSourcePath, this);
+            return NativeFilePicker.SaveGlb(preferences.LastOutputDirectory, this);
         }
 
         private static string AppendFailures(string result, List<string> failures) {
