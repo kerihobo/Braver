@@ -45,18 +45,41 @@ namespace CrossSlash {
         private bool _magicModels;
         private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
         private TextBox _txtModel, _txtScale;
+        private ListBox _lstModels;
+        private readonly List<string> _modelCodes;
 
         public BattleExportWindow(DataSource source, bool magicModels = false) {
             _source = source;
             _magicModels = magicModels;
+            _modelCodes = magicModels
+                ? ModelBatchDiscovery.FindMagicModels(source)
+                : ModelBatchDiscovery.FindBattleModels(source);
             _txtModel = DesktopUi.CreateTextBox();
             _txtScale = DesktopUi.CreateTextBox(magicModels ? "0.1" : "1");
+            _lstModels = new ListBox {
+                ItemsSource = _modelCodes,
+                MinHeight = 150,
+                MaxHeight = 230,
+                BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 227, 237)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4),
+            };
+            _lstModels.SelectionChanged += (_, _) => {
+                if (_lstModels.SelectedItem is string code)
+                    _txtModel.Text = code;
+            };
+            if (_modelCodes.Count > 0) {
+                _lstModels.SelectedIndex = 0;
+                _txtModel.Text = _modelCodes[0];
+            }
             _chkSRGB = new CheckBox { Content = "Convert colours from SRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 20, 10) };
             _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 20, 10) };
             _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 20, 10) };
 
             var content = new StackPanel();
             content.Children.Add(DesktopUi.CreateSectionTitle("Model settings"));
+            content.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Select one below or enter a model code manually."));
+            content.Children.Add(DesktopUi.CreateFormRow("Available models", _lstModels));
             content.Children.Add(DesktopUi.CreateFormRow("Model code", _txtModel));
             content.Children.Add(DesktopUi.CreateFormRow("Scale", _txtScale));
             content.Children.Add(new WrapPanel {
