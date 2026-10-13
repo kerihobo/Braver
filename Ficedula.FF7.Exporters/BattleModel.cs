@@ -116,16 +116,28 @@ namespace Ficedula.FF7.Exporters {
                 }
             }
 
-            var root = new NodeBuilder("-1");
-            root.LocalTransform = new SharpGLTF.Transforms.AffineTransform(
-                Quaternion.CreateFromAxisAngle(Vector3.UnitX, (float)Math.PI)
-            );
+            var rootContainer = new NodeBuilder("RootContainer");
+            var root = rootContainer.CreateNode("-1");
             Descend(scene, rootBone, root, Vector3.Zero, new Vector3(Options.Scale));
+
+            var firstRootRotation = firstFrame.Rotations.Length > 0 ? firstFrame.Rotations[0] : default;
+            var firstRootQuaternion = Quaternion.CreateFromYawPitchRoll(
+                -(360 * firstRootRotation.rY / 4096f) * (float)Math.PI / 180,
+                (180 + 360 * firstRootRotation.rX / 4096f) * (float)Math.PI / 180,
+                (360 * firstRootRotation.rZ / 4096f) * (float)Math.PI / 180
+            );
+            root.LocalTransform = SharpGLTF.Transforms.AffineTransform.CreateFromAny(
+                null,
+                new Vector3(Options.Scale),
+                firstRootQuaternion,
+                new Vector3(firstFrame.X, -firstFrame.Y, firstFrame.Z) * Options.Scale
+            );
+
             DescendMesh(
                 scene, rootBone, root, root.LocalMatrix,
                 allNodes.Where(kv => kv.Key >= 0).OrderBy(kv => kv.Key).Select(kv => kv.Value).ToArray()
             );
-            scene.AddNode(root);
+            scene.AddNode(rootContainer);
             if (weaponParts?.Count > 0 && weaponNode != null && weaponBone != null) {
                 for (int weaponIndex = 0; weaponIndex < weaponParts.Count; weaponIndex++) {
                     var weaponPart = weaponParts[weaponIndex];
@@ -153,37 +165,60 @@ namespace Ficedula.FF7.Exporters {
                 var mAnim = model.CreateAnimation();
                 mAnim.Name = "Anim" + (model.LogicalAnimations.Count - 1);
 
+                var rootNode = model.LogicalNodes.FirstOrDefault(n => n.Name == "RootContainer");
+                if (rootNode != null) {
+                    var rootRots = new Dictionary<float, Quaternion>();
+                    var rootTrans = new Dictionary<float, Vector3>();
+                    for (int frameIndex = 0; frameIndex < anim.Frames.Length; frameIndex++) {
+                        var frame = anim.Frames[frameIndex];
+                        if (frame == null)
+                            continue;
+
+                        float time = frameIndex / 15f;
+                        var rotation = frame.Rotations.Length > 0 ? frame.Rotations[0] : default;
+                        rootRots[time] = Quaternion.CreateFromYawPitchRoll(
+                            -(360 * rotation.rY / 4096f) * (float)Math.PI / 180,
+                            (360 * rotation.rX / 4096f) * (float)Math.PI / 180,
+                            (360 * rotation.rZ / 4096f) * (float)Math.PI / 180
+                        );
+                        // Keep the same small root-origin adjustment as Kujata's battle export.
+                        rootTrans[time] = new Vector3(
+                            frame.X,
+                            -frame.Y - 13.535284f,
+                            -frame.Z - 0.077069275f
+                        ) * Options.Scale;
+                    }
+                    if (rootRots.Count > 0)
+                        mAnim.CreateRotationChannel(rootNode, rootRots);
+                    if (rootTrans.Count > 0)
+                        mAnim.CreateTranslationChannel(rootNode, rootTrans);
+                }
+
                 foreach (var node in model.LogicalNodes) {
-                    int c = 0;
                     if (!int.TryParse(node.Name, out int boneIndex))
+                        continue;
+                    if (boneIndex < 0)
                         continue;
 
                     Dictionary<float, Quaternion> rots = new Dictionary<float, Quaternion>();
-                    Dictionary<float, Vector3> trans = new Dictionary<float, Vector3>();
 
-                    if (boneIndex < -1 || boneIndex >= bodyBoneCount)
+                    if (boneIndex >= bodyBoneCount)
                         continue;
 
-                    foreach (var frame in anim.Frames) {
-                        float additionalX = 0;
-                        if (node.VisualRoot == node) {
-                            trans[c / 15f] = new Vector3(frame.X, -frame.Y, frame.Z) * Options.Scale;
-                            additionalX = 180;
-                        }
+                    for (int frameIndex = 0; frameIndex < anim.Frames.Length; frameIndex++) {
+                        var frame = anim.Frames[frameIndex];
+                        if (frame == null || frame.Rotations.Length <= boneIndex + 1)
+                            continue;
 
                         var rotation = Quaternion.CreateFromYawPitchRoll(
                             (360 * frame.Rotations[boneIndex + 1].rY / 4096f) * (float)Math.PI / 180,
-                            (additionalX + 360 * frame.Rotations[boneIndex + 1].rX / 4096f) * (float)Math.PI / 180,
+                            (360 * frame.Rotations[boneIndex + 1].rX / 4096f) * (float)Math.PI / 180,
                             (360 * frame.Rotations[boneIndex + 1].rZ / 4096f) * (float)Math.PI / 180
                         );
 
-                        rots[c / 15f] = rotation;
-
-                        c++;
+                        rots[frameIndex / 15f] = rotation;
                     }
 
-                    if (node.VisualRoot == node)
-                        mAnim.CreateTranslationChannel(node, trans);
                     mAnim.CreateRotationChannel(node, rots);
                 }
                 if (weaponBone != null && animationIndex < weaponAnimationCount && animationIndex + bodyAnimationCount < animations.Anims.Count) {

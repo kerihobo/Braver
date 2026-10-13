@@ -57,13 +57,28 @@ namespace Ficedula.FF7.Exporters {
 
             void Descend(SceneBuilder scene, HRCModel.Bone bone, NodeBuilder node, Vector3 translation, Vector3? scale) {
                 sourceNodes[bone.Name] = bone;
-                var rotation = firstFrame == null
-                    ? Quaternion.Identity
-                    : Quaternion.CreateFromYawPitchRoll(
-                        firstFrame.Rotation.Y * (float)Math.PI / 180,
-                        firstFrame.Rotation.X * (float)Math.PI / 180,
-                        firstFrame.Rotation.Z * (float)Math.PI / 180
-                    );
+                Vector3 rotationDegrees = Vector3.Zero;
+                if (firstFrame != null) {
+                    if (bone.Index < 0) {
+                        rotationDegrees = new Vector3(
+                            firstFrame.Rotation.X - 180,
+                            360 - firstFrame.Rotation.Y,
+                            firstFrame.Rotation.Z
+                        );
+                        translation = new Vector3(
+                            firstFrame.Translation.X,
+                            firstFrame.Translation.Y,
+                            -firstFrame.Translation.Z
+                        );
+                    } else if (bone.Index < firstFrame.Bones.Count) {
+                        rotationDegrees = firstFrame.Bones[bone.Index];
+                    }
+                }
+                var rotation = Quaternion.CreateFromYawPitchRoll(
+                    rotationDegrees.Y * (float)Math.PI / 180,
+                    rotationDegrees.X * (float)Math.PI / 180,
+                    rotationDegrees.Z * (float)Math.PI / 180
+                );
 
                 node.LocalTransform = SharpGLTF.Transforms.AffineTransform.CreateFromAny(
                     null, scale ?? Vector3.One, rotation, translation
@@ -88,7 +103,8 @@ namespace Ficedula.FF7.Exporters {
                 }
             }
 
-            var root = new NodeBuilder("root");
+            var rootContainer = new NodeBuilder("RootContainer");
+            var root = rootContainer.CreateNode("root");
             Descend(scene, model.Root, root, Vector3.Zero, null);
             DescendMesh(
                 scene, model.Root, root, root.LocalMatrix, 
@@ -98,7 +114,7 @@ namespace Ficedula.FF7.Exporters {
                 .Select(bone => allNodes[bone.Name])
                 .ToArray()
             );
-            scene.AddNode(root);
+            scene.AddNode(rootContainer);
 
             FinishBaking();
 
@@ -121,7 +137,6 @@ namespace Ficedula.FF7.Exporters {
                     //    Console.WriteLine("Skipping: " + node.Name);
                     //    continue;
                     //}
-                    int c = 0;
                     int boneIndex;
                     if (sourceNodes.TryGetValue(node.Name ?? "", out var bone))
                         boneIndex = bone.Index;
@@ -131,17 +146,19 @@ namespace Ficedula.FF7.Exporters {
                     var rots = new Dictionary<float, Quaternion>();
                     var trans = new Dictionary<float, Vector3>();
 
-                    foreach (var frame in anim.Anim.Frames) {
+                    for (int frameIndex = 0; frameIndex < anim.Anim.Frames.Count; frameIndex++) {
+                        var frame = anim.Anim.Frames[frameIndex];
+                        float time = frameIndex / 30f;
                         Quaternion rotation;
 
-                        if (node.VisualRoot == node) {
-                            trans[c / 15f] = new Vector3(frame.Translation.X, frame.Translation.Y, frame.Translation.Z);
+                        if (boneIndex < 0) {
+                            trans[time] = new Vector3(frame.Translation.X, frame.Translation.Y, -frame.Translation.Z);
                             rotation = Quaternion.CreateFromYawPitchRoll(
-                                frame.Rotation.Y * (float)Math.PI / 180,
-                                frame.Rotation.X * (float)Math.PI / 180,
-                                (180 + frame.Rotation.Z) * (float)Math.PI / 180
+                                (360 - frame.Rotation.Y) * (float)Math.PI / 180,
+                                (frame.Rotation.X - 180) * (float)Math.PI / 180,
+                                frame.Rotation.Z * (float)Math.PI / 180
                             );
-                        } else if (/*anim.Anim.BoneCount > 0 && */boneIndex < anim.Anim.BoneCount) {
+                        } else if (boneIndex < anim.Anim.BoneCount && boneIndex < frame.Bones.Count) {
                             rotation = Quaternion.CreateFromYawPitchRoll(
                                 frame.Bones[boneIndex].Y * (float)Math.PI / 180,
                                 frame.Bones[boneIndex].X * (float)Math.PI / 180,
@@ -150,12 +167,10 @@ namespace Ficedula.FF7.Exporters {
                         } else {
                             rotation = Quaternion.Identity;
                         }
-                        rots[c / 15f] = rotation;
-
-                        c++;
+                        rots[time] = rotation;
                     }
 
-                    if (node.VisualRoot == node)
+                    if (boneIndex < 0)
                         mAnim.CreateTranslationChannel(node, trans);
 
                     foreach (var kvp in rots.ToList()) {
