@@ -75,6 +75,7 @@ namespace CrossSlash {
             Title = "LGP List/Extract";
 
             _lvFiles = new ListView {
+                Y = 1,
                 Width = Dim.Fill(1),
                 Height = 15,
                 AllowsMarking = true,
@@ -107,9 +108,9 @@ namespace CrossSlash {
             };
             bExtract.Clicked += BExtract_Clicked;
 
-            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(bExtract) + 1);
+            var btnBack = ExporterWindowNavigation.CreateBackButton();
 
-            Add(_lvFiles, bDest, bExtract, btnBack);
+            Add(btnBack, _lvFiles, bDest, bExtract);
         }
 
         private void BExtract_Clicked() {

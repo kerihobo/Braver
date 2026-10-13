@@ -8,11 +8,11 @@ using Terminal.Gui;
 
 namespace CrossSlash {
     internal static class ExporterWindowNavigation {
-        public static Button CreateBackButton(Pos y) {
+        public static Button CreateBackButton() {
             var button = new Button {
-                Text = "Back to main menu",
-                Y = y,
-                Width = Dim.Percent(35),
+                Text = "Back",
+                Y = 0,
+                Width = Dim.Percent(15),
             };
             button.Clicked += () => Application.RequestStop();
             return button;

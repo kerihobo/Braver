@@ -52,6 +52,7 @@ namespace CrossSlash {
             Title = magicModels ? "CrossSlash Magic Model Exporter" : "CrossSlash Battle Model Exporter";
 
             Label lblModel = new Label {
+                Y = 1,
                 Width = Dim.Percent(25),
                 Text = "Model Code",
             };
@@ -130,10 +131,9 @@ namespace CrossSlash {
                 btnExportAllBattlefields.Clicked += BtnExportAllBattlefields_Clicked;
             }
 
-            View lastAction = btnExportAllBattlefields ?? (View)btnExportAllAnimations;
-            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(lastAction) + 1);
+            var btnBack = ExporterWindowNavigation.CreateBackButton();
 
-            Add(lblModel, _txtModel, lblScale, _txtScale, 
+            Add(btnBack, lblModel, _txtModel, lblScale, _txtScale,
                 _chkSRGB, _chkSwapWinding, _chkBakeColours,
                 btnGLB, btnExportAll, btnExportAllAnimations);
             if (btnExportBattlefield != null && btnExportAllBattlefields != null)

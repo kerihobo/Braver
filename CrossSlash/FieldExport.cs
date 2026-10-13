@@ -65,6 +65,7 @@ namespace CrossSlash {
             Title = "CrossSlash Exporter (Ctrl-Q to Quit)";
 
             Label lblHRC = new Label {
+                Y = 1,
                 Width = Dim.Percent(25),
                 Text = "HRC/Model",
             };
@@ -137,7 +138,7 @@ namespace CrossSlash {
             };
             btnExportAllAnimations.Clicked += BtnExportAllAnimations_Clicked;
 
-            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(btnExportAllAnimations) + 1);
+            var btnBack = ExporterWindowNavigation.CreateBackButton();
 
             _hrcFiles = _source.AllFiles
                 .Where(s => Path.GetExtension(s).Equals(".hrc", StringComparison.InvariantCultureIgnoreCase))
@@ -145,10 +146,10 @@ namespace CrossSlash {
             _lvHRCs.SetSource(_hrcFiles);
 
 
-            Add(lblHRC, _lvHRCs, lblAnims, _txtAnims, 
+            Add(btnBack, lblHRC, _lvHRCs, lblAnims, _txtAnims,
                 _chkAllCompatible,
                 _chkSRGB, _chkSwapWinding, _chkBakeColours,
-                btnGLB, btnExportAll, btnExportAllAnimations, btnBack);
+                btnGLB, btnExportAll, btnExportAllAnimations);
         }
 
         private void BtnExport_Clicked() {

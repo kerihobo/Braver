@@ -66,6 +66,7 @@ namespace CrossSlash {
             _exporter = exporter;
 
             Label lblSounds = new Label {
+                Y = 1,
                 Text = "Sound IDs to export (leave blank for all)",
             };
             _txtSounds = new TextView {
@@ -99,9 +100,9 @@ namespace CrossSlash {
             };
             btnExport.Clicked += BtnExport_Clicked;
 
-            var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(btnExport) + 1);
+            var btnBack = ExporterWindowNavigation.CreateBackButton();
 
-            Add(lblSounds, _txtSounds, btnDest, btnExport, btnBack);
+            Add(btnBack, lblSounds, _txtSounds, btnDest, btnExport);
 
         }
 
