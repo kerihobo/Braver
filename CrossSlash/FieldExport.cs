@@ -57,7 +57,7 @@ namespace CrossSlash {
         private ListView _lvHRCs;
         private TextView _txtAnims;
         private List<string> _hrcFiles;
-        private CheckBox _chkAllCompatible, _chkSRGB, _chkSwapWinding, _chkBakeColours;
+        private CheckBox _chkAllCompatible, _chkSeparateAnimations, _chkSRGB, _chkSwapWinding, _chkBakeColours;
 
         private string _glbFile;
         private DataSource _source;
@@ -99,11 +99,16 @@ namespace CrossSlash {
             _txtAnims.Enabled = false;
             // Toggled supplies the previous state, so read Checked after the change.
             _chkAllCompatible.Toggled += _ => _txtAnims.Enabled = !_chkAllCompatible.Checked;
+            _chkSeparateAnimations = new CheckBox {
+                Checked = false,
+                Text = "Export animations to Animations folder",
+                Y = Pos.Bottom(_chkAllCompatible) + 1,
+            };
 
             _chkSRGB = new CheckBox {
                 Checked = true,
                 Text = "Convert colours from SRGB->Linear",
-                Y = Pos.Bottom(_chkAllCompatible) + 1,
+                Y = Pos.Bottom(_chkSeparateAnimations) + 1,
             };
             _chkSwapWinding = new CheckBox {
                 Checked = false,
@@ -153,7 +158,7 @@ namespace CrossSlash {
 
 
             Add(lblHRC, _lvHRCs, lblAnims, _txtAnims, 
-                _chkAllCompatible,
+                _chkAllCompatible, _chkSeparateAnimations,
                 _chkSRGB, _chkSwapWinding, _chkBakeColours,
                 btnGLB, _lblGLB, btnExport, btnExportAll, btnBack);
         }
@@ -163,7 +168,8 @@ namespace CrossSlash {
                 var anims = _txtAnims.Text
                     .ToString()
                     .Split('\r', '\n')
-                    .Where(s => !string.IsNullOrWhiteSpace(s));
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToList();
 
                 if (_source == null)
                     throw new Exception("No data source selected");
@@ -179,29 +185,33 @@ namespace CrossSlash {
                     SwapWinding = _chkSwapWinding.Checked,
                     BakeVertexColours = _chkBakeColours.Checked,
                 };
-                var exporter = new FieldModel(_source, options);
-                SharpGLTF.Schema2.ModelRoot model;
-                string successMessage = "Export Succeeded";
+                IEnumerable<string> animationFiles;
+                bool compatibleAnimationsOnly = _chkAllCompatible.Checked;
                 if (_chkAllCompatible.Checked) {
-                    var animationFiles = _source.AllFiles
+                    animationFiles = _source.AllFiles
                         .Where(file => Path.GetExtension(file).Equals(".a", StringComparison.OrdinalIgnoreCase))
                         .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
                         .ToList();
-                    model = exporter.BuildScene(
-                        _hrcFiles[_lvHRCs.SelectedItem],
-                        animationFiles,
-                        true,
-                        out var usedAnimations
-                    );
-                    successMessage += $"\nCompatible animations included: {usedAnimations.Count}";
                 } else {
                     foreach (var item in anims)
                         System.Diagnostics.Debug.WriteLine(item);
-                    model = exporter.BuildScene(_hrcFiles[_lvHRCs.SelectedItem], anims);
+                    animationFiles = anims;
                 }
 
-                model.SaveGLB(_glbFile);
+                var usedAnimations = ExportModel(
+                    _hrcFiles[_lvHRCs.SelectedItem],
+                    animationFiles.ToList(),
+                    compatibleAnimationsOnly,
+                    _glbFile,
+                    options,
+                    _chkSeparateAnimations.Checked
+                );
 
+                string successMessage = "Export Succeeded";
+                if (_chkAllCompatible.Checked)
+                    successMessage += $"\nCompatible animations: {usedAnimations.Count}";
+                if (_chkSeparateAnimations.Checked)
+                    successMessage += $"\nAnimations saved to:\n{GetAnimationOutputPath(_glbFile)}";
                 MessageBox.Query("Success", successMessage, "OK");
             } catch (Exception ex) {
                 MessageBox.ErrorQuery("Error", ex.Message, "OK");
@@ -237,17 +247,25 @@ namespace CrossSlash {
                 int exported = 0;
                 int compatibleAnimationCount = 0;
                 int modelsWithoutAnimations = 0;
+                int separateAnimationFiles = 0;
                 var failures = new List<string>();
                 foreach (string hrcFile in _hrcFiles) {
                     try {
-                        var exporter = new FieldModel(_source, options);
-                        var model = exporter.BuildScene(hrcFile, animationFiles, true, out var usedAnimations);
                         string outputFile = Path.Combine(
                             outputDirectory,
                             Path.GetFileNameWithoutExtension(hrcFile) + ".glb"
                         );
-                        model.SaveGLB(outputFile);
+                        var usedAnimations = ExportModel(
+                            hrcFile,
+                            animationFiles,
+                            compatibleAnimationsOnly: true,
+                            outputFile,
+                            options,
+                            _chkSeparateAnimations.Checked
+                        );
                         exported++;
+                        if (_chkSeparateAnimations.Checked)
+                            separateAnimationFiles++;
                         compatibleAnimationCount += usedAnimations.Count;
                         if (usedAnimations.Count == 0)
                             modelsWithoutAnimations++;
@@ -257,8 +275,10 @@ namespace CrossSlash {
                 }
 
                 string result = $"Exported {exported} of {_hrcFiles.Count} field models to:\n{outputDirectory}\n\n" +
-                    $"Compatible animations included: {compatibleAnimationCount}\n" +
+                    $"Compatible animation clips: {compatibleAnimationCount}\n" +
                     $"Models without compatible animations: {modelsWithoutAnimations}";
+                if (_chkSeparateAnimations.Checked)
+                    result += $"\nAnimation-only files: {separateAnimationFiles}";
                 if (failures.Count > 0) {
                     result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
                     if (failures.Count > 5)
@@ -280,6 +300,49 @@ namespace CrossSlash {
                 PreferencesStore.RememberOutputPath(path);
             }
         }
+
+        private IReadOnlyList<string> ExportModel(
+            string hrcFile,
+            IReadOnlyList<string> animationFiles,
+            bool compatibleAnimationsOnly,
+            string modelFile,
+            ModelBaseOptions options,
+            bool separateAnimations) {
+            var modelExporter = new FieldModel(_source, options);
+            var model = modelExporter.BuildScene(
+                hrcFile,
+                animationFiles,
+                compatibleAnimationsOnly,
+                out var usedAnimations,
+                includeMeshes: true,
+                includeAnimations: !separateAnimations
+            );
+            model.SaveGLB(modelFile);
+
+            if (!separateAnimations)
+                return usedAnimations;
+
+            var animationExporter = new FieldModel(_source, options);
+            var animationModel = animationExporter.BuildScene(
+                hrcFile,
+                animationFiles,
+                compatibleAnimationsOnly,
+                out usedAnimations,
+                includeMeshes: false,
+                includeAnimations: true
+            );
+            string animationFile = GetAnimationOutputPath(modelFile);
+            Directory.CreateDirectory(Path.GetDirectoryName(animationFile)!);
+            animationModel.SaveGLB(animationFile);
+            return usedAnimations;
+        }
+
+        private static string GetAnimationOutputPath(string modelFile) => Path.Combine(
+            Path.GetDirectoryName(modelFile) ?? string.Empty,
+            "Animations",
+            Path.GetFileNameWithoutExtension(modelFile),
+            "Animations.glb"
+        );
 
     }
 }

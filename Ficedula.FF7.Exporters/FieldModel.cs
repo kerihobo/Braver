@@ -27,7 +27,9 @@ namespace Ficedula.FF7.Exporters {
             string modelHRC,
             IEnumerable<string> animFiles,
             bool compatibleAnimationsOnly,
-            out IReadOnlyList<string> usedAnimations) {
+            out IReadOnlyList<string> usedAnimations,
+            bool includeMeshes = true,
+            bool includeAnimations = true) {
             var scene = new SceneBuilder();
             var model = new Field.HRCModel(_data.Open, modelHRC);
             var animationFiles = animFiles.ToList();
@@ -44,11 +46,13 @@ namespace Ficedula.FF7.Exporters {
                 throw new InvalidDataException("At least one field animation with frames is required.");
             usedAnimations = animations.Select(anim => anim.Name).ToList();
 
-            var materials = ConvertTextures(
-                model.Bones
-                .SelectMany(bone => bone.Polygons)
-                .SelectMany(poly => poly.Textures)
-            );
+            var materials = includeMeshes
+                ? ConvertTextures(
+                    model.Bones
+                    .SelectMany(bone => bone.Polygons)
+                    .SelectMany(poly => poly.Textures)
+                )
+                : new Dictionary<TexFile, MaterialBuilder>();
             MaterialBuilder defMaterial = GetUntexturedMaterial();
 
             var firstFrame = animations.FirstOrDefault()?.Anim.Frames.FirstOrDefault();
@@ -106,17 +110,20 @@ namespace Ficedula.FF7.Exporters {
             var rootContainer = new NodeBuilder("RootContainer");
             var root = rootContainer.CreateNode("root");
             Descend(scene, model.Root, root, Vector3.Zero, null);
-            DescendMesh(
-                scene, model.Root, root, root.LocalMatrix, 
-                sourceNodes.Values
-                .Where(bone => bone.Index >= 0)
-                .OrderBy(bone => bone.Index)
-                .Select(bone => allNodes[bone.Name])
-                .ToArray()
-            );
+            if (includeMeshes) {
+                DescendMesh(
+                    scene, model.Root, root, root.LocalMatrix,
+                    sourceNodes.Values
+                    .Where(bone => bone.Index >= 0)
+                    .OrderBy(bone => bone.Index)
+                    .Select(bone => allNodes[bone.Name])
+                    .ToArray()
+                );
+            }
             scene.AddNode(rootContainer);
 
-            FinishBaking();
+            if (includeMeshes)
+                FinishBaking();
 
             SceneBuilderSchema2Settings settings = SceneBuilderSchema2Settings.Default;
             settings.UseStridedBuffers = false;
@@ -124,7 +131,7 @@ namespace Ficedula.FF7.Exporters {
             //Console.WriteLine($"Anim names ({animations.Count}): {string.Join(" ", animations.Select(x => x.Name).ToArray())}");
             //Console.WriteLine($"Nodes ({output.LogicalNodes.Count}): {string.Join(", ", output.LogicalNodes.Select(x => x.Name).ToArray())}");
 
-            foreach (var anim in animations) {
+            foreach (var anim in animations.Where(_ => includeAnimations)) {
                 //Console.WriteLine($"Processing animation: {anim.Name}");
 
                 SharpGLTF.Schema2.Animation mAnim = output.CreateAnimation();

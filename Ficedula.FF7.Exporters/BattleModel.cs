@@ -31,7 +31,7 @@ namespace Ficedula.FF7.Exporters {
             _options = options;
         }
 
-        private SharpGLTF.Schema2.ModelRoot BuildScene(string skeleton, string anims, IEnumerable<string> texs, Func<string?> nextFile, IReadOnlyList<(string Name, PFile Model)>? weaponParts = null, int bodyAnimationCount = 0, int weaponAnimationCount = 0) {
+        private SharpGLTF.Schema2.ModelRoot BuildScene(string skeleton, string anims, IEnumerable<string> texs, Func<string?> nextFile, IReadOnlyList<(string Name, PFile Model)>? weaponParts = null, int bodyAnimationCount = 0, int weaponAnimationCount = 0, bool includeMeshes = true, bool includeAnimations = true) {
             var scene = new SceneBuilder();
 
             Animations animations;
@@ -44,24 +44,28 @@ namespace Ficedula.FF7.Exporters {
             int bodyBoneCount = rootBone.ThisAndDescendants().Count(b => b.Index >= 0);
             BBone? weaponBone = null;
 
-            var textures = texs
-                .Select(t => {
-                    using (var s = _source.TryOpen(t))
-                        return s == null ? null : new Ficedula.FF7.TexFile(s);
-                })
-                .Where(tex => tex != null)
-                .ToArray();
+            var textures = includeMeshes
+                ? texs
+                    .Select(t => {
+                        using (var s = _source.TryOpen(t))
+                            return s == null ? null : new Ficedula.FF7.TexFile(s);
+                    })
+                    .OfType<Ficedula.FF7.TexFile>()
+                    .ToArray()
+                : Array.Empty<Ficedula.FF7.TexFile>();
 
             var materials = ConvertTextures(textures);
             var orderedMaterials = textures.Select(t => materials[t]).ToList();
             MaterialBuilder defMaterial = GetUntexturedMaterial();
 
             List<PFile> pFiles = new();
-            foreach (var bone in rootBone.ThisAndDescendants().Where(b => b.PFileIndex != null).OrderBy(b => b.PFileIndex.Value)) {
-                while (pFiles.Count <= bone.PFileIndex.Value)
-                    pFiles.Add(null);
-                using (var s = _source.Open(nextFile()))
-                    pFiles[bone.PFileIndex.Value] = new PFile(s);
+            if (includeMeshes) {
+                foreach (var bone in rootBone.ThisAndDescendants().Where(b => b.PFileIndex != null).OrderBy(b => b.PFileIndex.Value)) {
+                    while (pFiles.Count <= bone.PFileIndex.Value)
+                        pFiles.Add(null);
+                    using (var s = _source.Open(nextFile()))
+                        pFiles[bone.PFileIndex.Value] = new PFile(s);
+                }
             }
 
             if (weaponParts?.Count > 0) {
@@ -133,12 +137,14 @@ namespace Ficedula.FF7.Exporters {
                 new Vector3(firstFrame.X, -firstFrame.Y, firstFrame.Z) * Options.Scale
             );
 
-            DescendMesh(
-                scene, rootBone, root, root.LocalMatrix,
-                allNodes.Where(kv => kv.Key >= 0).OrderBy(kv => kv.Key).Select(kv => kv.Value).ToArray()
-            );
+            if (includeMeshes) {
+                DescendMesh(
+                    scene, rootBone, root, root.LocalMatrix,
+                    allNodes.Where(kv => kv.Key >= 0).OrderBy(kv => kv.Key).Select(kv => kv.Value).ToArray()
+                );
+            }
             scene.AddNode(rootContainer);
-            if (weaponParts?.Count > 0 && weaponNode != null && weaponBone != null) {
+            if (includeMeshes && weaponParts?.Count > 0 && weaponNode != null && weaponBone != null) {
                 for (int weaponIndex = 0; weaponIndex < weaponParts.Count; weaponIndex++) {
                     var weaponPart = weaponParts[weaponIndex];
                     var partNode = weaponNode.CreateNode(weaponPart.Name);
@@ -147,7 +153,8 @@ namespace Ficedula.FF7.Exporters {
                 }
             }
 
-            FinishBaking();
+            if (includeMeshes)
+                FinishBaking();
 
             var settings = SceneBuilderSchema2Settings.Default;
             settings.UseStridedBuffers = false;
@@ -155,7 +162,7 @@ namespace Ficedula.FF7.Exporters {
 
             // Create animations for skeleton nodes (ones with numeric names) as before
             int numBodyAnimations = weaponParts?.Count > 0 ? bodyAnimationCount : animations.Anims.Count;
-            for (int animationIndex = 0; animationIndex < numBodyAnimations; animationIndex++) {
+            for (int animationIndex = 0; includeAnimations && animationIndex < numBodyAnimations; animationIndex++) {
                 var anim = animations.Anims[animationIndex];
                 if (anim == null)
                     continue;
@@ -252,18 +259,18 @@ namespace Ficedula.FF7.Exporters {
             return model;
         }
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneAuto(string name) {
+        public SharpGLTF.Schema2.ModelRoot BuildSceneAuto(string name, bool includeMeshes = true, bool includeAnimations = true) {
             if (_source.Exists(name + ".a00"))
-                return BuildSceneFromSummon(name);
+                return BuildSceneFromSummon(name, includeMeshes, includeAnimations);
             else if (IsBattleLocation(_source, name))
                 return BuildSceneFromBattleLocation(name);
             else if (_source.Exists(name + "DA"))
-                return BuildSceneFromModel(name);
+                return BuildSceneFromModel(name, includeMeshes, includeAnimations);
             else
                 throw new Exception($"Can't detect battle model type");
         }
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneFromSummon(string summonName) {
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromSummon(string summonName, bool includeMeshes = true, bool includeAnimations = true) {
             //TODO - very similar to code in main Braver project - move into Ficedula.FF7
             var texs = Enumerable.Range(0, 99).Select(i => $"{summonName}.t{i:00}");
             int part = 0;
@@ -277,7 +284,8 @@ namespace Ficedula.FF7.Exporters {
                 } while (!_source.Exists(data));
                 return data;
             };
-            return BuildScene(summonName + ".d", summonName + ".a00", texs, NextData);
+            return BuildScene(summonName + ".d", summonName + ".a00", texs, NextData,
+                includeMeshes: includeMeshes, includeAnimations: includeAnimations);
         }
 
         public SharpGLTF.Schema2.ModelRoot BuildSceneFromBattleLocation(string locationCode) {
@@ -378,7 +386,7 @@ namespace Ficedula.FF7.Exporters {
             return locationCode + (char)('a' + suffixIndex / 26) + (char)('a' + suffixIndex % 26);
         }
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneFromModel(string modelCode) {
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromModel(string modelCode, bool includeMeshes = true, bool includeAnimations = true) {
             //TODO - very similar to code in main Braver project - move into Ficedula.FF7
             var texs = Enumerable.Range((int)'c', 10).Select(i => modelCode + "a" + ((char)i).ToString());
             int codecounter = 12;
@@ -418,7 +426,7 @@ namespace Ficedula.FF7.Exporters {
             }
 
             return BuildScene(modelCode + "aa", modelCode + "da", texs, NextData, weaponParts,
-                bodyAnimationCount, weaponAnimationCount);
+                bodyAnimationCount, weaponAnimationCount, includeMeshes, includeAnimations);
         }
     }
 }

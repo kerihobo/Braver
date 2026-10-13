@@ -45,7 +45,7 @@ namespace CrossSlash {
         private string _glbFile;
         private DataSource _source;
         private bool _magicModels;
-        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
+        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkSeparateAnimations;
         private TextField _txtModel, _txtScale;
 
         public BattleExportWindow(DataSource source, bool magicModels = false) {
@@ -90,11 +90,16 @@ namespace CrossSlash {
                 Text = "Bake Vertex Colours to texture",
                 Y = Pos.Bottom(_chkSwapWinding),
             };
+            _chkSeparateAnimations = new CheckBox {
+                Checked = false,
+                Text = "Export animations to Animations folder",
+                Y = Pos.Bottom(_chkBakeColours),
+            };
 
             var btnGLB = new Button {
                 Text = "Save GLB As",
                 Width = Dim.Percent(25),
-                Y = Pos.Bottom(_chkBakeColours) + 1,
+                Y = Pos.Bottom(_chkSeparateAnimations) + 1,
             };
             btnGLB.Clicked += BtnGLB_Clicked;
 
@@ -142,7 +147,7 @@ namespace CrossSlash {
             var btnBack = ExporterWindowNavigation.CreateBackButton(Pos.Bottom(lastAction) + 1);
 
             Add(lblModel, _txtModel, lblScale, _txtScale, 
-                _chkSRGB, _chkSwapWinding, _chkBakeColours,
+                _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkSeparateAnimations,
                 btnGLB, _lblGLB, btnExport, btnExportAll);
             if (btnExportBattlefield != null && btnExportAllBattlefields != null)
                 Add(btnExportBattlefield, btnExportAllBattlefields);
@@ -172,11 +177,18 @@ namespace CrossSlash {
                     throw new Exception("No scale specified");
 
                 var options = GetOptions(scale);
-                var exporter = new BattleModel(_source, options);
-                var model = exporter.BuildSceneAuto(_txtModel.Text.ToString());
-                model.SaveGLB(_glbFile);
+                string modelCode = _txtModel.Text?.ToString() ?? string.Empty;
+                string? animationFile = ExportModel(
+                    modelCode,
+                    _glbFile,
+                    options,
+                    _chkSeparateAnimations.Checked
+                );
 
-                MessageBox.Query("Success", "Export Succeeded", "OK");
+                string message = "Export Succeeded";
+                if (animationFile != null)
+                    message += $"\nAnimations saved to:\n{animationFile}";
+                MessageBox.Query("Success", message, "OK");
             } catch (Exception ex) {
                 MessageBox.ErrorQuery("Error", ex.Message, "OK");
             }
@@ -207,14 +219,18 @@ namespace CrossSlash {
                 PreferencesStore.RememberOutputDirectory(outputDirectory);
 
                 int exported = 0;
+                int animationsExported = 0;
                 var failures = new List<string>();
                 foreach (string code in modelCodes) {
                     try {
-                        var exporter = new BattleModel(_source, GetOptions(scale));
-                        var model = _magicModels
-                            ? exporter.BuildSceneFromSummon(code)
-                            : exporter.BuildSceneFromModel(code);
-                        model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
+                        string? animationFile = ExportModel(
+                            code,
+                            Path.Combine(outputDirectory, code + ".glb"),
+                            GetOptions(scale),
+                            _chkSeparateAnimations.Checked
+                        );
+                        if (animationFile != null)
+                            animationsExported++;
                         exported++;
                     } catch (Exception ex) {
                         failures.Add($"{code}: {ex.Message}");
@@ -222,6 +238,8 @@ namespace CrossSlash {
                 }
 
                 string result = $"Exported {exported} of {modelCodes.Count} models to:\n{outputDirectory}";
+                if (_chkSeparateAnimations.Checked)
+                    result += $"\nSeparate animation files: {animationsExported}";
                 if (failures.Count > 0) {
                     result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
                     if (failures.Count > 5)
@@ -303,6 +321,31 @@ namespace CrossSlash {
             BakeVertexColours = _chkBakeColours.Checked,
             Scale = scale,
         };
+
+        private string? ExportModel(string modelCode, string modelFile, BattleModelOptions options, bool separateAnimations) {
+            if (!separateAnimations || BattleModel.IsBattleLocation(_source, modelCode)) {
+                var exporter = new BattleModel(_source, options);
+                exporter.BuildSceneAuto(modelCode).SaveGLB(modelFile);
+                return null;
+            }
+
+            string animationFile = GetAnimationOutputPath(modelFile);
+            Directory.CreateDirectory(Path.GetDirectoryName(animationFile)!);
+
+            var modelExporter = new BattleModel(_source, options);
+            modelExporter.BuildSceneAuto(modelCode, includeMeshes: true, includeAnimations: false).SaveGLB(modelFile);
+
+            var animationExporter = new BattleModel(_source, options);
+            animationExporter.BuildSceneAuto(modelCode, includeMeshes: false, includeAnimations: true).SaveGLB(animationFile);
+            return animationFile;
+        }
+
+        private static string GetAnimationOutputPath(string modelFile) => Path.Combine(
+            Path.GetDirectoryName(modelFile) ?? string.Empty,
+            "Animations",
+            Path.GetFileNameWithoutExtension(modelFile),
+            "Animations.glb"
+        );
     }
 
     internal static class ModelBatchDiscovery {
