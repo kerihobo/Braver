@@ -23,6 +23,20 @@ namespace Ficedula.FF7.Exporters {
             return BuildScene(modelHRC, animFiles, false, out _);
         }
 
+        public IReadOnlyList<string> FindCompatibleAnimations(string modelHRC, IEnumerable<string> animationFiles) {
+            int modelBoneCount;
+            using (var hrc = _data.Open(modelHRC)) {
+                string[] lines = hrc.ReadAllLines().ToArray();
+                modelBoneCount = int.Parse(lines[2].Split(null).Last());
+                if (modelBoneCount == 0)
+                    modelBoneCount = 1;
+            }
+
+            return animationFiles
+                .Where(file => HasCompatibleSkeleton(file, modelBoneCount))
+                .ToList();
+        }
+
         public SharpGLTF.Schema2.ModelRoot BuildScene(
             string modelHRC,
             IEnumerable<string> animFiles,

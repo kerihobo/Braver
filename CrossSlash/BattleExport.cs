@@ -6,9 +6,11 @@
 
 using Ficedula.FF7.Exporters;
 using System;
+using System.ComponentModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 
 namespace CrossSlash {
@@ -45,10 +47,11 @@ namespace CrossSlash {
         private DataSource _source;
         private bool _magicModels;
         private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
-        private readonly TextBox _txtModel, _txtScale, _txtBattlefield;
+        private readonly TextBox _txtModelSearch, _txtScale, _txtBattlefield;
         private readonly ListBox _lstModels, _lstBattlefields;
         private readonly List<string> _modelCodes;
         private readonly List<string> _battlefieldCodes;
+        private readonly ICollectionView _modelView;
 
         public BattleExportWindow(DataSource source, bool magicModels = false) {
             _source = source;
@@ -57,25 +60,24 @@ namespace CrossSlash {
                 ? ModelBatchDiscovery.FindMagicModels(source)
                 : ModelBatchDiscovery.FindBattleModels(source);
             _battlefieldCodes = magicModels ? new List<string>() : ModelBatchDiscovery.FindBattleLocations(source);
-            _txtModel = DesktopUi.CreateTextBox();
+            _txtModelSearch = DesktopUi.CreateTextBox();
+            _txtModelSearch.ToolTip = "Search available models";
+            _modelView = CollectionViewSource.GetDefaultView(_modelCodes);
+            _modelView.Filter = item => item is string code &&
+                (string.IsNullOrWhiteSpace(_txtModelSearch.Text) || code.Contains(_txtModelSearch.Text, StringComparison.OrdinalIgnoreCase));
+            _txtModelSearch.TextChanged += (_, _) => _modelView.Refresh();
             _txtScale = DesktopUi.CreateTextBox(magicModels ? "0.1" : "1");
             _txtBattlefield = DesktopUi.CreateTextBox();
             _lstModels = new ListBox {
-                ItemsSource = _modelCodes,
+                ItemsSource = _modelView,
                 MinHeight = 150,
                 MaxHeight = 230,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
             };
-            _lstModels.SelectionChanged += (_, _) => {
-                if (_lstModels.SelectedItem is string code)
-                    _txtModel.Text = code;
-            };
-            if (_modelCodes.Count > 0) {
+            if (_lstModels.Items.Count > 0)
                 _lstModels.SelectedIndex = 0;
-                _txtModel.Text = _modelCodes[0];
-            }
             _lstBattlefields = new ListBox {
                 ItemsSource = _battlefieldCodes,
                 MinHeight = 150,
@@ -125,9 +127,8 @@ namespace CrossSlash {
         private UIElement CreateBattleModelContent() {
             var panel = new StackPanel { Margin = new Thickness(12) };
             panel.Children.Add(DesktopUi.CreateSectionTitle("Battle models"));
-            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Select one or enter a model code manually."));
-            panel.Children.Add(DesktopUi.CreateFormRow("Available models", _lstModels));
-            panel.Children.Add(DesktopUi.CreateFormRow("Model code", _txtModel));
+            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Search the list and select a model to export."));
+            panel.Children.Add(DesktopUi.CreateFormRow("Available models", CreateModelPicker()));
 
             var export = DesktopUi.CreateButton("Export model", primary: true);
             export.Click += (_, _) => BtnExport_Clicked();
@@ -157,9 +158,8 @@ namespace CrossSlash {
         private UIElement CreateMagicModelContent() {
             var panel = new StackPanel();
             panel.Children.Add(DesktopUi.CreateSectionTitle("Summon models"));
-            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} summons detected. Select one or enter a model code manually."));
-            panel.Children.Add(DesktopUi.CreateFormRow("Available summons", _lstModels));
-            panel.Children.Add(DesktopUi.CreateFormRow("Model code", _txtModel));
+            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} summons detected. Search the list and select a model to export."));
+            panel.Children.Add(DesktopUi.CreateFormRow("Available summons", CreateModelPicker()));
 
             var export = DesktopUi.CreateButton("Export model", primary: true);
             export.Click += (_, _) => BtnExport_Clicked();
@@ -171,12 +171,19 @@ namespace CrossSlash {
             return panel;
         }
 
+        private UIElement CreateModelPicker() {
+            var picker = new StackPanel();
+            picker.Children.Add(DesktopUi.CreateFormRow("Search", _txtModelSearch, 80));
+            picker.Children.Add(_lstModels);
+            return picker;
+        }
+
         private void BtnExport_Clicked() {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (string.IsNullOrWhiteSpace(_txtModel.Text))
-                    throw new Exception("No model file selected");
+                if (_lstModels.SelectedItem is not string modelCode)
+                    throw new Exception("Select a model from the available models list.");
                 if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
@@ -185,7 +192,6 @@ namespace CrossSlash {
                     return;
 
                 var options = GetOptions(scale);
-                string modelCode = _txtModel.Text;
                 var exporter = new BattleModel(_source, options);
                 exporter.BuildSceneAuto(modelCode).SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);

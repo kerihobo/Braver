@@ -5,8 +5,10 @@
 // SPDX-License-Identifier: EPL-2.0
 
 using Ficedula.FF7.Exporters;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 
 namespace CrossSlash {
@@ -36,13 +38,16 @@ namespace CrossSlash {
     }
 
     public class FieldExportWindow : Window {
-        private readonly ListBox _lvHRCs;
-        private readonly TextBox _txtAnims;
-        private readonly List<string> _hrcFiles;
+        private readonly ListBox _lvHRCs, _lstAnimations;
+        private readonly TextBox _txtModelSearch;
+        private readonly ICollectionView _hrcView;
+        private readonly List<string> _hrcFiles, _animationFiles;
+        private List<string> _compatibleAnimationFiles = new();
         private readonly CheckBox _chkAllCompatible;
         private readonly CheckBox _chkSRGB;
         private readonly CheckBox _chkSwapWinding;
         private readonly CheckBox _chkBakeColours;
+        private readonly TextBlock _animationHint;
         private readonly DataSource _source;
 
         public FieldExportWindow(DataSource source) {
@@ -51,33 +56,48 @@ namespace CrossSlash {
                 .Where(file => Path.GetExtension(file).Equals(".hrc", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            _animationFiles = source.AllFiles
+                .Where(file => Path.GetExtension(file).Equals(".a", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
+            _txtModelSearch = DesktopUi.CreateTextBox();
+            _txtModelSearch.ToolTip = "Search field models";
+            _hrcView = CollectionViewSource.GetDefaultView(_hrcFiles);
+            _hrcView.Filter = item => item is string file &&
+                (string.IsNullOrWhiteSpace(_txtModelSearch.Text) || file.Contains(_txtModelSearch.Text, StringComparison.OrdinalIgnoreCase));
             _lvHRCs = new ListBox {
-                ItemsSource = _hrcFiles,
+                ItemsSource = _hrcView,
                 MinHeight = 220,
                 MaxHeight = 340,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
             };
-            if (_hrcFiles.Count > 0)
-                _lvHRCs.SelectedIndex = 0;
+            _txtModelSearch.TextChanged += (_, _) => _hrcView.Refresh();
 
-            _txtAnims = DesktopUi.CreateTextBox();
-            _txtAnims.AcceptsReturn = true;
-            _txtAnims.TextWrapping = TextWrapping.Wrap;
-            _txtAnims.VerticalContentAlignment = VerticalAlignment.Top;
-            _txtAnims.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-            _txtAnims.MinHeight = 100;
+            _lstAnimations = new ListBox {
+                ItemsSource = Array.Empty<string>(),
+                SelectionMode = SelectionMode.Multiple,
+                MinHeight = 140,
+                MaxHeight = 230,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4),
+                IsEnabled = false,
+            };
+            _animationHint = DesktopUi.CreateHint("Compatible animations for the selected model will appear here.");
 
             _chkAllCompatible = new CheckBox {
                 Content = "Use all compatible animations",
                 IsChecked = true,
                 Margin = new Thickness(0, 4, 0, 12),
             };
-            _txtAnims.IsEnabled = false;
-            _chkAllCompatible.Checked += (_, _) => _txtAnims.IsEnabled = false;
-            _chkAllCompatible.Unchecked += (_, _) => _txtAnims.IsEnabled = true;
+            _chkAllCompatible.Checked += (_, _) => _lstAnimations.IsEnabled = false;
+            _chkAllCompatible.Unchecked += (_, _) => _lstAnimations.IsEnabled = true;
+            _lvHRCs.SelectionChanged += (_, _) => RefreshCompatibleAnimations();
+            if (_lvHRCs.Items.Count > 0)
+                _lvHRCs.SelectedIndex = 0;
 
             _chkSRGB = new CheckBox { Content = "Convert colours from sRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 18, 8) };
             _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 18, 8) };
@@ -86,9 +106,10 @@ namespace CrossSlash {
             var content = new StackPanel();
             content.Children.Add(DesktopUi.CreateSectionTitle("Field model"));
             content.Children.Add(DesktopUi.CreateHint($"Choose a model from the source. {_hrcFiles.Count} HRC models found."));
-            content.Children.Add(DesktopUi.CreateFormRow("Model", _lvHRCs, 110));
-            content.Children.Add(DesktopUi.CreateFormRow("Animation files", _txtAnims, 110));
+            content.Children.Add(DesktopUi.CreateFormRow("Model", CreateModelPicker(), 110));
             content.Children.Add(_chkAllCompatible);
+            content.Children.Add(DesktopUi.CreateFormRow("Compatible animations", _lstAnimations, 110));
+            content.Children.Add(_animationHint);
             content.Children.Add(new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 16),
                 Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
@@ -118,31 +139,27 @@ namespace CrossSlash {
                 if (_lvHRCs.SelectedItem is not string hrcFile)
                     throw new InvalidOperationException("Select an HRC model first.");
 
-                var animations = _txtAnims.Text
-                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (_chkAllCompatible.IsChecked != true && animations.Length == 0)
-                    throw new InvalidOperationException("Enter one or more animation files, or enable all compatible animations.");
+                var animations = _chkAllCompatible.IsChecked == true
+                    ? _compatibleAnimationFiles
+                    : _lstAnimations.SelectedItems.Cast<string>().ToList();
+                if (_chkAllCompatible.IsChecked != true && animations.Count == 0)
+                    throw new InvalidOperationException("Select one or more compatible animations, or enable all compatible animations.");
 
                 string? outputFile = ChooseGlbPath();
                 if (outputFile == null)
                     return;
 
                 var exporter = new FieldModel(_source, GetOptions());
-                IEnumerable<string> animationFiles = _chkAllCompatible.IsChecked == true
-                    ? GetAllAnimationFiles()
-                    : animations;
                 var model = exporter.BuildScene(
                     hrcFile,
-                    animationFiles,
+                    animations,
                     compatibleAnimationsOnly: _chkAllCompatible.IsChecked == true,
                     out var usedAnimations
                 );
                 model.SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
 
-                string message = "Export succeeded.";
-                if (_chkAllCompatible.IsChecked == true)
-                    message += $"\nCompatible animations included: {usedAnimations.Count}";
+                string message = $"Export succeeded.\nAnimations included: {usedAnimations.Count}";
                 DesktopUi.ShowInfo(this, "Export complete", message);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Export failed", ex.Message);
@@ -233,10 +250,38 @@ namespace CrossSlash {
             }
         }
 
-        private IEnumerable<string> GetAllAnimationFiles() => _source.AllFiles
-            .Where(file => Path.GetExtension(file).Equals(".a", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        private UIElement CreateModelPicker() {
+            var picker = new StackPanel();
+            picker.Children.Add(DesktopUi.CreateFormRow("Search", _txtModelSearch, 80));
+            picker.Children.Add(_lvHRCs);
+            return picker;
+        }
+
+        private void RefreshCompatibleAnimations() {
+            if (_lvHRCs.SelectedItem is not string hrcFile) {
+                _compatibleAnimationFiles = new List<string>();
+                _lstAnimations.ItemsSource = _compatibleAnimationFiles;
+                _animationHint.Text = "Select a field model to find its compatible animations.";
+                return;
+            }
+
+            try {
+                var exporter = new FieldModel(_source, GetOptions());
+                _compatibleAnimationFiles = exporter.FindCompatibleAnimations(hrcFile, _animationFiles).ToList();
+                _lstAnimations.ItemsSource = _compatibleAnimationFiles;
+                _animationHint.Text = _compatibleAnimationFiles.Count == 0
+                    ? "No compatible animations were found for this model."
+                    : $"{_compatibleAnimationFiles.Count:N0} compatible animations found for {hrcFile}.";
+                _chkAllCompatible.Content = $"Use all compatible animations ({_compatibleAnimationFiles.Count:N0})";
+            } catch (Exception ex) {
+                _compatibleAnimationFiles = new List<string>();
+                _lstAnimations.ItemsSource = _compatibleAnimationFiles;
+                _animationHint.Text = $"Could not check animation compatibility: {ex.Message}";
+                _chkAllCompatible.Content = "Use all compatible animations";
+            }
+        }
+
+        private IEnumerable<string> GetAllAnimationFiles() => _animationFiles;
 
         private ModelBaseOptions GetOptions() => new() {
             ConvertSRGBToLinear = _chkSRGB.IsChecked == true,
