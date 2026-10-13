@@ -12,6 +12,7 @@ namespace CrossSlash {
         private readonly TextBox _txtSourcePath;
 
         public string? DefaultSourcePath => _txtSourcePath.Text;
+        public event Action<string?>? Saved;
 
         public PreferencesWindow(string? defaultSourcePath) {
             _txtSourcePath = DesktopUi.CreateTextBox(defaultSourcePath);
@@ -47,7 +48,7 @@ namespace CrossSlash {
                 HorizontalAlignment = HorizontalAlignment.Right,
             };
             var cancel = DesktopUi.CreateButton("Cancel");
-            cancel.Click += (_, _) => Close();
+            cancel.Click += (_, _) => DesktopUi.RequestBack(this, Close);
             var save = DesktopUi.CreateButton("Save", primary: true);
             save.Margin = new Thickness(0);
             save.Click += (_, _) => Save();
@@ -60,6 +61,7 @@ namespace CrossSlash {
                 "Preferences",
                 "Set a default source location",
                 content,
+                back: Close,
                 width: 720,
                 height: 420
             );
@@ -72,8 +74,8 @@ namespace CrossSlash {
                 return;
             }
 
-            DialogResult = true;
-            Close();
+            Saved?.Invoke(path);
+            DesktopUi.RequestBack(this, Close);
         }
     }
 }

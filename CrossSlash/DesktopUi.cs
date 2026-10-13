@@ -12,6 +12,9 @@ using System.Windows.Media;
 
 namespace CrossSlash {
     internal static class DesktopUi {
+        public static Window? MainWindow { get; set; }
+        public static Action? BackNavigation { get; set; }
+
         private static readonly Brush PageBackground = Brush("#F3F6FA");
         private static readonly Brush HeaderBackground = Brush("#172B4D");
         private static readonly Brush Accent = Brush("#2563EB");
@@ -56,7 +59,7 @@ namespace CrossSlash {
                 backButton.Foreground = Brushes.White;
                 backButton.BorderBrush = Brush("#536986");
                 backButton.Margin = new Thickness(0, 0, 20, 0);
-                backButton.Click += (_, _) => back();
+                backButton.Click += (_, _) => RequestBack(window, back);
                 DockPanel.SetDock(backButton, Dock.Left);
                 headerLayout.Children.Add(backButton);
             }
@@ -192,10 +195,20 @@ namespace CrossSlash {
             Margin = new Thickness(0, 4, 0, 12),
         };
 
+        public static void RequestBack(Window screen, Action? fallback = null) {
+            if (MainWindow != null && !ReferenceEquals(MainWindow, screen) && BackNavigation != null) {
+                BackNavigation();
+                return;
+            }
+            fallback?.Invoke();
+        }
+
+        public static Window ResolveOwner(Window requestedOwner) => MainWindow ?? requestedOwner;
+
         public static void ShowInfo(Window owner, string title, string message) =>
-            MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(ResolveOwner(owner), message, title, MessageBoxButton.OK, MessageBoxImage.Information);
 
         public static void ShowError(Window owner, string title, string message) =>
-            MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(ResolveOwner(owner), message, title, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

@@ -96,7 +96,8 @@ namespace CrossSlash {
         }
 
         private static bool Show(IFileDialog dialog, Window? owner) {
-            IntPtr ownerHandle = owner == null ? IntPtr.Zero : new WindowInteropHelper(owner).Handle;
+            Window? dialogOwner = owner == null ? DesktopUi.MainWindow : DesktopUi.ResolveOwner(owner);
+            IntPtr ownerHandle = dialogOwner == null ? IntPtr.Zero : new WindowInteropHelper(dialogOwner).Handle;
             int result = dialog.Show(ownerHandle);
             if (result == HResultCancelled)
                 return false;

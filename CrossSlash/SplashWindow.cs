@@ -14,8 +14,17 @@ namespace CrossSlash {
     public sealed class SplashWindow : Window {
         private readonly CrossSlashPreferences _preferences;
         private readonly Dictionary<string, SourceRow> _sourceRows = new(StringComparer.InvariantCultureIgnoreCase);
+        private UIElement? _homeContent;
+        private DataSource? _activeSource;
 
         public SplashWindow() {
+            DesktopUi.MainWindow = this;
+            DesktopUi.BackNavigation = NavigateHome;
+            Closed += (_, _) => {
+                DisposeActiveSource();
+                DesktopUi.BackNavigation = null;
+                DesktopUi.MainWindow = null;
+            };
             _preferences = PreferencesStore.Load();
             var preferencesButton = DesktopUi.CreateButton("Preferences");
             preferencesButton.Click += (_, _) => OpenPreferences();
@@ -38,6 +47,7 @@ namespace CrossSlash {
                 width: 1120,
                 height: 820
             );
+            _homeContent = Content as UIElement;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
 
@@ -78,7 +88,7 @@ namespace CrossSlash {
             var open = DesktopUi.CreateButton("Open", primary: true);
             open.Margin = new Thickness(0);
             open.Click += (_, _) => RunExporter(key, exporter, path);
-            _sourceRows[key] = new SourceRow { Path = path };
+            _sourceRows[key] = new SourceRow { Path = path, SourceType = sourceType };
 
             row.Children.Add(name);
             Grid.SetColumn(sourceType, 1);
@@ -113,6 +123,7 @@ namespace CrossSlash {
             sourcePath.Text = path;
             sourcePath.ToolTip = path;
             RememberSourcePath(key, path);
+            sourceType.SelectedIndex = Directory.Exists(path) ? 1 : 0;
         }
 
         private void RunExporter(string key, ExportKind exporter, TextBox sourcePath) {
@@ -130,24 +141,27 @@ namespace CrossSlash {
                 return;
             }
 
-            RememberSourcePath(key, path);
             try {
-                Window window = exporter.ExecuteGui(source);
-                window.Owner = this;
-                window.ShowDialog();
-            } finally {
+                RememberSourcePath(key, path);
+                Window screen = exporter.ExecuteGui(source);
+                ShowScreen(screen);
+                _activeSource = source;
+            } catch (Exception ex) {
                 if (source is IDisposable disposable)
                     disposable.Dispose();
+                DesktopUi.ShowError(this, "Could not open exporter", ex.Message);
             }
         }
 
         private void OpenPreferences() {
-            string? previousDefault = _preferences.DefaultSourcePath;
-            var window = new PreferencesWindow(previousDefault) { Owner = this };
-            if (window.ShowDialog() != true)
-                return;
+            var screen = new PreferencesWindow(_preferences.DefaultSourcePath);
+            screen.Saved += SavePreferences;
+            ShowScreen(screen);
+        }
 
-            _preferences.DefaultSourcePath = window.DefaultSourcePath;
+        private void SavePreferences(string? defaultSourcePath) {
+            string? previousDefault = _preferences.DefaultSourcePath;
+            _preferences.DefaultSourcePath = defaultSourcePath;
             try {
                 PreferencesStore.Save(_preferences);
             } catch (Exception ex) {
@@ -158,8 +172,28 @@ namespace CrossSlash {
                 if (string.IsNullOrWhiteSpace(row.Path.Text) || row.Path.Text == previousDefault) {
                     row.Path.Text = _preferences.DefaultSourcePath ?? string.Empty;
                     row.Path.ToolTip = row.Path.Text;
+                    row.SourceType.SelectedIndex = !string.IsNullOrWhiteSpace(row.Path.Text) && Directory.Exists(row.Path.Text) ? 1 : 0;
                 }
             }
+        }
+
+        private void ShowScreen(Window screen) {
+            if (screen.Content is not UIElement content)
+                throw new InvalidOperationException("The exporter screen has no content to display.");
+            screen.Content = null;
+            Content = content;
+        }
+
+        private void NavigateHome() {
+            if (_homeContent != null)
+                Content = _homeContent;
+            DisposeActiveSource();
+        }
+
+        private void DisposeActiveSource() {
+            if (_activeSource is IDisposable disposable)
+                disposable.Dispose();
+            _activeSource = null;
         }
 
         private void RememberSourcePath(string key, string path) {
@@ -173,6 +207,7 @@ namespace CrossSlash {
 
         private sealed class SourceRow {
             public TextBox Path { get; init; } = null!;
+            public ComboBox SourceType { get; init; } = null!;
         }
     }
 }
