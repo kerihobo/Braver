@@ -90,7 +90,7 @@ namespace CrossSlash {
             };
             var btnGLB = new Button {
                 Text = "Export",
-                Width = Dim.Percent(50),
+                Width = Dim.Percent(24),
                 Y = Pos.Bottom(_chkBakeColours) + 1,
             };
             btnGLB.Clicked += BtnExport_Clicked;
@@ -98,13 +98,14 @@ namespace CrossSlash {
             var btnExportAll = new Button {
                 X = Pos.Right(btnGLB) + 1,
                 Y = btnGLB.Y,
-                Width = Dim.Fill(1),
+                Width = Dim.Percent(37),
                 Text = magicModels ? "Export All Summons" : "Export All Battle Models",
             };
             btnExportAll.Clicked += BtnExportAll_Clicked;
 
             var btnExportAllAnimations = new Button {
-                Y = Pos.Bottom(btnExportAll) + 1,
+                X = Pos.Right(btnExportAll) + 1,
+                Y = btnGLB.Y,
                 Width = Dim.Fill(1),
                 Text = "Export All Animations",
             };
