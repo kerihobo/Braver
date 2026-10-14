@@ -312,7 +312,7 @@ namespace CrossSlash {
             }
         }
 
-        private void ExportAllModels() {
+        private async void ExportAllModels() {
             try {
                 if (_hrcFiles.Count == 0)
                     throw new InvalidOperationException("No HRC field models were found in the selected source.");
@@ -321,45 +321,65 @@ namespace CrossSlash {
                 if (outputDirectory == null)
                     return;
 
-                var animations = _chkEmbedAnimations.IsChecked == true || _chkFirstFrameBindPose.IsChecked == true
+                string[] animations = (_chkEmbedAnimations.IsChecked == true || _chkFirstFrameBindPose.IsChecked == true
                     ? GetSelectedOrAllAnimationFiles()
-                    : Array.Empty<string>();
-                int exported = 0;
-                int animationCount = 0;
-                int modelsWithoutAnimations = 0;
-                var failures = new List<string>();
-                foreach (string hrcFile in _hrcFiles) {
-                    try {
-                        var exporter = new FieldModel(_source, GetOptions());
-                        var model = exporter.BuildScene(
-                            hrcFile,
-                            animations,
-                            compatibleAnimationsOnly: true,
-                            out var usedAnimations,
-                            includeAnimations: _chkEmbedAnimations.IsChecked == true,
-                            useFirstAnimationFrameAsBindPose: _chkFirstFrameBindPose.IsChecked == true
-                        );
-                        model.SaveGLB(Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(hrcFile) + ".glb"));
-                        exported++;
-                        animationCount += usedAnimations.Count;
-                        if (usedAnimations.Count == 0)
-                            modelsWithoutAnimations++;
-                    } catch (Exception ex) {
-                        failures.Add($"{hrcFile}: {ex.Message}");
-                    }
-                }
+                    : Array.Empty<string>()).ToArray();
+                DataSource source = _source;
+                ModelBaseOptions options = GetOptions();
+                bool includeAnimations = _chkEmbedAnimations.IsChecked == true;
+                bool useFirstFrame = _chkFirstFrameBindPose.IsChecked == true;
+                string result = await BatchExportRunner.RunAsync(
+                    this,
+                    "Exporting all field models",
+                    _hrcFiles.Count,
+                    (progress, cancellationToken) => {
+                        int exported = 0;
+                        int animationCount = 0;
+                        int modelsWithoutAnimations = 0;
+                        int processed = 0;
+                        var failures = new List<string>();
+                        for (int index = 0; index < _hrcFiles.Count; index++) {
+                            if (cancellationToken.IsCancellationRequested)
+                                break;
+                            string hrcFile = _hrcFiles[index];
+                            progress.Report(new BatchProgressUpdate(index, _hrcFiles.Count, $"Exporting {hrcFile}…"));
+                            try {
+                                var exporter = new FieldModel(source, options);
+                                var model = exporter.BuildScene(
+                                    hrcFile,
+                                    animations,
+                                    compatibleAnimationsOnly: true,
+                                    out var usedAnimations,
+                                    includeAnimations: includeAnimations,
+                                    useFirstAnimationFrameAsBindPose: useFirstFrame
+                                );
+                                model.SaveGLB(Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(hrcFile) + ".glb"));
+                                exported++;
+                                animationCount += usedAnimations.Count;
+                                if (usedAnimations.Count == 0)
+                                    modelsWithoutAnimations++;
+                            } catch (Exception ex) {
+                                failures.Add($"{hrcFile}: {ex.Message}");
+                            }
+                            processed++;
+                            progress.Report(new BatchProgressUpdate(index + 1, _hrcFiles.Count, $"Processed {hrcFile}"));
+                        }
 
-                string animationSummary = _chkEmbedAnimations.IsChecked == true
+                        string animationSummary = includeAnimations
                     ? $"Compatible animation clips: {animationCount}\nModels without compatible animations: {modelsWithoutAnimations}"
                     : "Animations were not embedded.";
-                string result = $"Exported {exported} of {_hrcFiles.Count} field models to:\n{outputDirectory}\n\n{animationSummary}";
-                DesktopUi.ShowInfo(this, "Export all field models", AppendFailures(result, failures));
+                        string status = processed < _hrcFiles.Count ? "Cancelled. " : string.Empty;
+                        string summary = $"{status}Exported {exported} of {_hrcFiles.Count} field models to:\n{outputDirectory}\n\n{animationSummary}";
+                        return AppendFailures(summary, failures);
+                    }
+                );
+                DesktopUi.ShowInfo(this, "Export all field models", result);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Export failed", ex.Message);
             }
         }
 
-        private void ExportAllAnimations() {
+        private async void ExportAllAnimations() {
             try {
                 if (_hrcFiles.Count == 0)
                     throw new InvalidOperationException("No HRC field models were found in the selected source.");
@@ -368,41 +388,59 @@ namespace CrossSlash {
                 if (outputDirectory == null)
                     return;
 
-                var animations = GetSelectedOrAllAnimationFiles();
-                int exportedModels = 0;
-                int animationCount = 0;
-                int modelsWithoutAnimations = 0;
-                var failures = new List<string>();
-                foreach (string hrcFile in _hrcFiles) {
-                    try {
-                        var exporter = new FieldModel(_source, GetOptions());
-                        var model = exporter.BuildScene(
-                            hrcFile,
-                            animations,
-                            compatibleAnimationsOnly: true,
-                            out var usedAnimations,
-                            includeMeshes: false,
-                            includeAnimations: true,
-                            useFirstAnimationFrameAsBindPose: _chkFirstFrameBindPose.IsChecked == true
-                        );
-                        animationCount += usedAnimations.Count;
-                        if (usedAnimations.Count == 0) {
-                            modelsWithoutAnimations++;
-                            continue;
+                string[] animations = GetSelectedOrAllAnimationFiles().ToArray();
+                DataSource source = _source;
+                ModelBaseOptions options = GetOptions();
+                bool useFirstFrame = _chkFirstFrameBindPose.IsChecked == true;
+                string result = await BatchExportRunner.RunAsync(
+                    this,
+                    "Exporting all field animations",
+                    _hrcFiles.Count,
+                    (progress, cancellationToken) => {
+                        int exportedModels = 0;
+                        int animationCount = 0;
+                        int modelsWithoutAnimations = 0;
+                        int processed = 0;
+                        var failures = new List<string>();
+                        for (int index = 0; index < _hrcFiles.Count; index++) {
+                            if (cancellationToken.IsCancellationRequested)
+                                break;
+                            string hrcFile = _hrcFiles[index];
+                            progress.Report(new BatchProgressUpdate(index, _hrcFiles.Count, $"Exporting animations for {hrcFile}…"));
+                            try {
+                                var exporter = new FieldModel(source, options);
+                                var model = exporter.BuildScene(
+                                    hrcFile,
+                                    animations,
+                                    compatibleAnimationsOnly: true,
+                                    out var usedAnimations,
+                                    includeMeshes: false,
+                                    includeAnimations: true,
+                                    useFirstAnimationFrameAsBindPose: useFirstFrame
+                                );
+                                animationCount += usedAnimations.Count;
+                                if (usedAnimations.Count == 0) {
+                                    modelsWithoutAnimations++;
+                                } else {
+                                    string outputFile = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(hrcFile), "Animations.glb");
+                                    Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
+                                    model.SaveGLB(outputFile);
+                                    exportedModels++;
+                                }
+                            } catch (Exception ex) {
+                                failures.Add($"{hrcFile}: {ex.Message}");
+                            }
+                            processed++;
+                            progress.Report(new BatchProgressUpdate(index + 1, _hrcFiles.Count, $"Processed {hrcFile}"));
                         }
 
-                        string outputFile = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(hrcFile), "Animations.glb");
-                        Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
-                        model.SaveGLB(outputFile);
-                        exportedModels++;
-                    } catch (Exception ex) {
-                        failures.Add($"{hrcFile}: {ex.Message}");
+                        string status = processed < _hrcFiles.Count ? "Cancelled. " : string.Empty;
+                        string summary = $"{status}Exported animations for {exportedModels} field models to:\n{outputDirectory}\n\n" +
+                            $"Compatible animation clips: {animationCount}\nModels without compatible animations: {modelsWithoutAnimations}";
+                        return AppendFailures(summary, failures);
                     }
-                }
-
-                string result = $"Exported animations for {exportedModels} field models to:\n{outputDirectory}\n\n" +
-                    $"Compatible animation clips: {animationCount}\nModels without compatible animations: {modelsWithoutAnimations}";
-                DesktopUi.ShowInfo(this, "Export all field animations", AppendFailures(result, failures));
+                );
+                DesktopUi.ShowInfo(this, "Export all field animations", result);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Export failed", ex.Message);
             }

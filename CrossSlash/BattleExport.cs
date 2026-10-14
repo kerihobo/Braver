@@ -643,7 +643,7 @@ namespace CrossSlash {
             }
         }
 
-        private void BtnExportAll_Clicked(IReadOnlyList<string>? categoryModelCodes = null, string? category = null) {
+        private async void BtnExportAll_Clicked(IReadOnlyList<string>? categoryModelCodes = null, string? category = null) {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
@@ -669,32 +669,50 @@ namespace CrossSlash {
                     return;
                 PreferencesStore.RememberOutputDirectory(outputDirectory);
 
-                int exported = 0;
-                int animationCount = 0;
-                var failures = new List<string>();
-                foreach (string code in modelCodes) {
-                    try {
-                        var exporter = new BattleModel(_source, GetOptions(scale));
-                        bool embedAnimations = _chkEmbedAnimations.IsChecked == true;
-                        var animationIndices = embedAnimations ? GetSelectedAnimationIndices(_activeAnimations) : null;
-                        var model = exporter.BuildSceneAuto(code, includeAnimations: embedAnimations, animationIndices: animationIndices);
-                        model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
-                        animationCount += model.LogicalAnimations.Count;
-                        exported++;
-                    } catch (Exception ex) {
-                        failures.Add($"{code}: {ex.Message}");
-                    }
-                }
+                DataSource source = _source;
+                BattleModelOptions options = GetOptions(scale);
+                bool embedAnimations = _chkEmbedAnimations.IsChecked == true;
+                IReadOnlyCollection<int>? animationIndices = embedAnimations ? GetSelectedAnimationIndices(_activeAnimations) : null;
+                string result = await BatchExportRunner.RunAsync(
+                    this,
+                    _magicModels ? $"Exporting all {group.ToLowerInvariant()} models" : "Exporting all battle models",
+                    modelCodes.Count,
+                    (progress, cancellationToken) => {
+                        int exported = 0;
+                        int animationCount = 0;
+                        int processed = 0;
+                        var failures = new List<string>();
+                        for (int index = 0; index < modelCodes.Count; index++) {
+                            if (cancellationToken.IsCancellationRequested)
+                                break;
+                            string code = modelCodes[index];
+                            progress.Report(new BatchProgressUpdate(index, modelCodes.Count, $"Exporting {code}…"));
+                            try {
+                                var exporter = new BattleModel(source, options);
+                                var model = exporter.BuildSceneAuto(code, includeAnimations: embedAnimations, animationIndices: animationIndices);
+                                model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
+                                animationCount += model.LogicalAnimations.Count;
+                                exported++;
+                            } catch (Exception ex) {
+                                failures.Add($"{code}: {ex.Message}");
+                            }
+                            processed++;
+                            progress.Report(new BatchProgressUpdate(index + 1, modelCodes.Count, $"Processed {code}"));
+                        }
 
-                string animationSummary = _chkEmbedAnimations.IsChecked == true
+                        string animationSummary = embedAnimations
                     ? $"Animation clips included: {animationCount}"
                     : "Animations were not embedded.";
-                string result = $"Exported {exported} of {modelCodes.Count} models to:\n{outputDirectory}\n\n{animationSummary}";
-                if (failures.Count > 0) {
-                    result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
-                    if (failures.Count > 5)
-                        result += "\n...";
-                }
+                        string status = processed < modelCodes.Count ? "Cancelled. " : string.Empty;
+                        string summary = $"{status}Exported {exported} of {modelCodes.Count} models to:\n{outputDirectory}\n\n{animationSummary}";
+                        if (failures.Count > 0) {
+                            summary += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
+                            if (failures.Count > 5)
+                                summary += "\n...";
+                        }
+                        return summary;
+                    }
+                );
                 DesktopUi.ShowInfo(this, _magicModels ? $"Export All {group} Models" : "Export All", result);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Error", ex.Message);
@@ -725,7 +743,7 @@ namespace CrossSlash {
             }
         }
 
-        private void BtnExportAllBattlefields_Clicked() {
+        private async void BtnExportAllBattlefields_Clicked() {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
@@ -746,32 +764,50 @@ namespace CrossSlash {
                     return;
                 PreferencesStore.RememberOutputDirectory(outputDirectory);
 
-                int exported = 0;
-                var failures = new List<string>();
-                foreach (string code in locationCodes) {
-                    try {
-                        var exporter = new BattleModel(_source, GetOptions(scale));
-                        var model = exporter.BuildSceneFromBattleLocation(code);
-                        model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
-                        exported++;
-                    } catch (Exception ex) {
-                        failures.Add($"{code}: {ex.Message}");
-                    }
-                }
+                DataSource source = _source;
+                BattleModelOptions options = GetOptions(scale);
+                string result = await BatchExportRunner.RunAsync(
+                    this,
+                    "Exporting all battlefields",
+                    locationCodes.Count,
+                    (progress, cancellationToken) => {
+                        int exported = 0;
+                        int processed = 0;
+                        var failures = new List<string>();
+                        for (int index = 0; index < locationCodes.Count; index++) {
+                            if (cancellationToken.IsCancellationRequested)
+                                break;
+                            string code = locationCodes[index];
+                            progress.Report(new BatchProgressUpdate(index, locationCodes.Count, $"Exporting {code}…"));
+                            try {
+                                var exporter = new BattleModel(source, options);
+                                var model = exporter.BuildSceneFromBattleLocation(code);
+                                model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
+                                exported++;
+                            } catch (Exception ex) {
+                                failures.Add($"{code}: {ex.Message}");
+                            }
+                            processed++;
+                            progress.Report(new BatchProgressUpdate(index + 1, locationCodes.Count, $"Processed {code}"));
+                        }
 
-                string result = $"Exported {exported} of {locationCodes.Count} battlefields to:\n{outputDirectory}";
-                if (failures.Count > 0) {
-                    result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
-                    if (failures.Count > 5)
-                        result += "\n...";
-                }
+                        string status = processed < locationCodes.Count ? "Cancelled. " : string.Empty;
+                        string summary = $"{status}Exported {exported} of {locationCodes.Count} battlefields to:\n{outputDirectory}";
+                        if (failures.Count > 0) {
+                            summary += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
+                            if (failures.Count > 5)
+                                summary += "\n...";
+                        }
+                        return summary;
+                    }
+                );
                 DesktopUi.ShowInfo(this, "Export Battlefields", result);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Error", ex.Message);
             }
         }
 
-        private void BtnExportAllAnimations_Clicked(IReadOnlyList<string>? categoryModelCodes = null, string? category = null) {
+        private async void BtnExportAllAnimations_Clicked(IReadOnlyList<string>? categoryModelCodes = null, string? category = null) {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
@@ -795,30 +831,48 @@ namespace CrossSlash {
                     return;
                 PreferencesStore.RememberOutputDirectory(outputDirectory);
 
-                int exported = 0;
-                int animationCount = 0;
-                var failures = new List<string>();
-                foreach (string code in modelCodes) {
-                    try {
-                        var exporter = new BattleModel(_source, GetOptions(scale));
-                        var model = exporter.BuildSceneAuto(code, includeMeshes: false, includeAnimations: true);
-                        string outputFile = Path.Combine(outputDirectory, code, "Animations.glb");
-                        Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
-                        model.SaveGLB(outputFile);
-                        animationCount += model.LogicalAnimations.Count;
-                        exported++;
-                    } catch (Exception ex) {
-                        failures.Add($"{code}: {ex.Message}");
-                    }
-                }
+                DataSource source = _source;
+                BattleModelOptions options = GetOptions(scale);
+                string result = await BatchExportRunner.RunAsync(
+                    this,
+                    $"Exporting {group.ToLowerInvariant()} animations",
+                    modelCodes.Count,
+                    (progress, cancellationToken) => {
+                        int exported = 0;
+                        int animationCount = 0;
+                        int processed = 0;
+                        var failures = new List<string>();
+                        for (int index = 0; index < modelCodes.Count; index++) {
+                            if (cancellationToken.IsCancellationRequested)
+                                break;
+                            string code = modelCodes[index];
+                            progress.Report(new BatchProgressUpdate(index, modelCodes.Count, $"Exporting animations for {code}…"));
+                            try {
+                                var exporter = new BattleModel(source, options);
+                                var model = exporter.BuildSceneAuto(code, includeMeshes: false, includeAnimations: true);
+                                string outputFile = Path.Combine(outputDirectory, code, "Animations.glb");
+                                Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
+                                model.SaveGLB(outputFile);
+                                animationCount += model.LogicalAnimations.Count;
+                                exported++;
+                            } catch (Exception ex) {
+                                failures.Add($"{code}: {ex.Message}");
+                            }
+                            processed++;
+                            progress.Report(new BatchProgressUpdate(index + 1, modelCodes.Count, $"Processed {code}"));
+                        }
 
-                string result = $"Exported animations for {exported} of {modelCodes.Count} models to:\n{outputDirectory}\n" +
-                    $"Animation clips: {animationCount}";
-                if (failures.Count > 0) {
-                    result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
-                    if (failures.Count > 5)
-                        result += "\n...";
-                }
+                        string status = processed < modelCodes.Count ? "Cancelled. " : string.Empty;
+                        string summary = $"{status}Exported animations for {exported} of {modelCodes.Count} models to:\n{outputDirectory}\n" +
+                            $"Animation clips: {animationCount}";
+                        if (failures.Count > 0) {
+                            summary += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
+                            if (failures.Count > 5)
+                                summary += "\n...";
+                        }
+                        return summary;
+                    }
+                );
                 DesktopUi.ShowInfo(this, _magicModels ? $"Export All {group} Animations" : "Export All Animations", result);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Error", ex.Message);

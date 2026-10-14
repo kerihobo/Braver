@@ -28,6 +28,7 @@ namespace CrossSlash {
 
         public static Brush SurfaceBrush => Surface;
         public static Brush InputBackgroundBrush => InputBackground;
+        public static Brush AccentBrush => Accent;
         public static Brush ControlBorderBrush => ControlBorder;
         public static Brush TextPrimaryBrush => TextPrimary;
         public static Brush TextSecondaryBrush => TextSecondary;

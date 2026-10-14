@@ -39,7 +39,6 @@ let currentAction = null;
 let currentClip = null;
 let currentAnimationName = '';
 let activeLighting = null;
-let fieldLightObjects = [];
 let isPlaying = false;
 let viewerVisible = true;
 let requestId = 0;
@@ -94,13 +93,58 @@ function resetCurrentModel() {
     disposeObject(currentModel.scene);
     currentModel = null;
   }
-  fieldLightObjects = [];
   defaultLights.forEach((light) => { light.visible = true; });
   updateViewerLabels();
   scheduleFrame();
 }
 
-function makeLitMaterial(source) {
+function createFieldLightingState(lighting) {
+  const state = {
+    uniforms: null,
+    objectMatrix: new THREE.Matrix4(),
+    objectNormalMatrix: new THREE.Matrix3(),
+    ambientColor: new THREE.Color(),
+    ambientIntensity: 0,
+    lightColors: Array.from({ length: 3 }, () => new THREE.Color()),
+    lightPositions: Array.from({ length: 3 }, () => new THREE.Vector3()),
+    lightIntensities: [0, 0, 0],
+    lightDecays: [1, 1, 1],
+  };
+  updateFieldLightingState(state, lighting);
+  return state;
+}
+
+function updateFieldLightingState(state, lighting) {
+  const pointLights = Array.isArray(lighting?.pointLights) ? lighting.pointLights : [];
+  const positionScale = lighting?.positionScale || 512;
+  state.ambientColor.setHex(lighting?.ambientColor ?? 0x575455);
+  state.ambientIntensity = lighting ? (lighting.ambientIntensity ?? 1) : 0;
+
+  for (let index = 0; index < 3; index++) {
+    const source = pointLights[index];
+    state.lightColors[index].setHex(source?.color ?? 0xffffff);
+    state.lightPositions[index].set(
+      (source?.x ?? 0) / positionScale,
+      (source?.y ?? 0) / positionScale,
+      (source?.z ?? 0) / positionScale
+    );
+    state.lightIntensities[index] = source?.intensity ?? 0;
+    state.lightDecays[index] = source?.decay ?? 1;
+  }
+
+  if (!state.uniforms)
+    return;
+  state.uniforms.fieldAmbientColor.value.copy(state.ambientColor);
+  state.uniforms.fieldAmbientIntensity.value = state.ambientIntensity;
+  for (let index = 0; index < 3; index++) {
+    state.uniforms[`fieldLightColor${index}`].value.copy(state.lightColors[index]);
+    state.uniforms[`fieldLightPosition${index}`].value.copy(state.lightPositions[index]);
+    state.uniforms[`fieldLightIntensity${index}`].value = state.lightIntensities[index];
+    state.uniforms[`fieldLightDecay${index}`].value = state.lightDecays[index];
+  }
+}
+
+function makeLitMaterial(source, state) {
   const material = new THREE.MeshLambertMaterial({
     color: source.color,
     map: source.map,
@@ -116,55 +160,124 @@ function makeLitMaterial(source) {
   });
   material.name = source.name;
   material.toneMapped = source.toneMapped;
+  material.onBeforeCompile = (shader) => {
+    const uniforms = {
+      fieldObjectMatrix: { value: state.objectMatrix },
+      fieldObjectNormalMatrix: { value: state.objectNormalMatrix },
+      fieldAmbientColor: { value: state.ambientColor },
+      fieldAmbientIntensity: { value: state.ambientIntensity },
+    };
+    for (let index = 0; index < 3; index++) {
+      uniforms[`fieldLightColor${index}`] = { value: state.lightColors[index] };
+      uniforms[`fieldLightPosition${index}`] = { value: state.lightPositions[index] };
+      uniforms[`fieldLightIntensity${index}`] = { value: state.lightIntensities[index] };
+      uniforms[`fieldLightDecay${index}`] = { value: state.lightDecays[index] };
+    }
+    state.uniforms = uniforms;
+    Object.assign(shader.uniforms, uniforms);
+
+    const lightDeclarations = [0, 1, 2].map((index) => [
+      `uniform vec3 fieldLightColor${index};`,
+      `uniform vec3 fieldLightPosition${index};`,
+      `uniform float fieldLightIntensity${index};`,
+      `uniform float fieldLightDecay${index};`,
+    ].join('\n')).join('\n');
+    const vertexDeclarations = [
+      'uniform mat4 fieldObjectMatrix;',
+      'uniform mat3 fieldObjectNormalMatrix;',
+      'uniform vec3 fieldAmbientColor;',
+      'uniform float fieldAmbientIntensity;',
+      'varying vec3 vFieldAmbientIrradiance;',
+      'varying vec3 vFieldDirectIrradiance;',
+      'varying vec3 vFieldDirectIrradianceBack;',
+      lightDeclarations,
+    ].join('\n');
+    const vertexLighting = [
+      'vec3 fieldVertexPosition = (fieldObjectMatrix * vec4(transformed, 1.0)).xyz;',
+      'vec3 fieldVertexNormal = normalize(fieldObjectNormalMatrix * objectNormal);',
+      '#ifdef FLIP_SIDED',
+      '  fieldVertexNormal = -fieldVertexNormal;',
+      '#endif',
+      'vFieldAmbientIrradiance = fieldAmbientColor * fieldAmbientIntensity;',
+      'vec3 fieldVertexDirectIrradiance = vec3(0.0);',
+      'vec3 fieldVertexDirectIrradianceBack = vec3(0.0);',
+      ...[0, 1, 2].flatMap((index) => [
+        `vec3 fieldToLight${index} = fieldLightPosition${index} - fieldVertexPosition;`,
+        `float fieldDistance${index} = length(fieldToLight${index});`,
+        `vec3 fieldDirection${index} = fieldToLight${index} / max(fieldDistance${index}, 0.0001);`,
+        `float fieldAttenuation${index} = fieldLightIntensity${index} / max(pow(max(fieldDistance${index}, 0.0001), fieldLightDecay${index}), 0.01);`,
+        `float fieldNdotL${index} = max(dot(fieldVertexNormal, fieldDirection${index}), 0.0);`,
+        `float fieldNdotLBack${index} = max(dot(-fieldVertexNormal, fieldDirection${index}), 0.0);`,
+        `fieldVertexDirectIrradiance += fieldLightColor${index} * fieldAttenuation${index} * fieldNdotL${index};`,
+        `fieldVertexDirectIrradianceBack += fieldLightColor${index} * fieldAttenuation${index} * fieldNdotLBack${index};`,
+      ]),
+      'vFieldDirectIrradiance = fieldVertexDirectIrradiance;',
+      'vFieldDirectIrradianceBack = fieldVertexDirectIrradianceBack;',
+    ].join('\n');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying vec3 vFieldAmbientIrradiance;\nvarying vec3 vFieldDirectIrradiance;\nvarying vec3 vFieldDirectIrradianceBack;'
+      )
+      .replace(
+        '#include <lights_fragment_end>',
+        [
+          '#include <lights_fragment_end>',
+          'vec3 fieldDirectIrradiance = vFieldDirectIrradiance;',
+          '#ifdef DOUBLE_SIDED',
+          '  if (!gl_FrontFacing) fieldDirectIrradiance = vFieldDirectIrradianceBack;',
+          '#endif',
+          'reflectedLight.indirectDiffuse += vFieldAmbientIrradiance * BRDF_Lambert(diffuseColor.rgb);',
+          'reflectedLight.directDiffuse += fieldDirectIrradiance * BRDF_Lambert(diffuseColor.rgb);',
+        ].join('\n')
+      );
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${vertexDeclarations}`)
+      .replace('#include <skinning_vertex>', `#include <skinning_vertex>\n${vertexLighting}`);
+  };
+  material.customProgramCacheKey = () => 'crossslash-field-object-lighting-v1';
   source.dispose();
   return material;
 }
 
 function applyFieldPointLighting(root, lighting, convertMaterials = false) {
-  for (const light of fieldLightObjects)
-    light.parent?.remove(light);
-  fieldLightObjects = [];
-
-  if (!Array.isArray(lighting?.pointLights)) {
-    defaultLights.forEach((light) => { light.visible = true; });
-    return;
-  }
-
-  defaultLights.forEach((light) => { light.visible = false; });
-  const ambientLight = new THREE.AmbientLight(lighting.ambientColor ?? 0x575455, lighting.ambientIntensity ?? 1);
-  root.add(ambientLight);
-  fieldLightObjects.push(ambientLight);
-
   const lightRoot = root.getObjectByName('root') || root;
-  const positionScale = lighting.positionScale || 512;
-  for (const sourceLight of lighting.pointLights) {
-    const light = new THREE.PointLight(
-      sourceLight.color,
-      sourceLight.intensity ?? 48,
-      sourceLight.distance ?? 0,
-      sourceLight.decay ?? 2
-    );
-    // FF7's light records are in the HRC model's local XYZ basis. Parenting to
-    // the animated root applies the same root-axis rotation as the skeleton.
-    // Keep that basis, but convert FF7's 512-units-per-model-unit positions;
-    // the coordinates are local offsets, not positions thousands of GLB units away.
-    light.position.set(
-      sourceLight.x / positionScale,
-      sourceLight.y / positionScale,
-      sourceLight.z / positionScale
-    );
-    lightRoot.add(light);
-    fieldLightObjects.push(light);
-  }
+  const hasFieldLighting = Array.isArray(lighting?.pointLights);
+  defaultLights.forEach((light) => { light.visible = !hasFieldLighting; });
 
-  if (convertMaterials) {
-    root.traverse((object) => {
-      if (!object.isMesh || !object.material) return;
-      object.material = Array.isArray(object.material)
-        ? object.material.map((material) => makeLitMaterial(material))
-        : makeLitMaterial(object.material);
-    });
-  }
+  root.traverse((object) => {
+    const states = object.userData.fieldLightingStates;
+    if (Array.isArray(states))
+      states.forEach((state) => updateFieldLightingState(state, lighting));
+  });
+
+  if (!convertMaterials) return;
+  root.traverse((object) => {
+    if (!object.isMesh || !object.material) return;
+    const states = [];
+    const convert = (source) => {
+      const state = createFieldLightingState(lighting);
+      states.push(state);
+      return makeLitMaterial(source, state);
+    };
+    object.material = Array.isArray(object.material)
+      ? object.material.map(convert)
+      : convert(object.material);
+    object.userData.fieldLightingStates = states;
+
+    const previousOnBeforeRender = object.onBeforeRender;
+    const inverseRoot = new THREE.Matrix4();
+    object.onBeforeRender = function (renderer, scene, camera, geometry, material, group) {
+      previousOnBeforeRender.call(this, renderer, scene, camera, geometry, material, group);
+      lightRoot.updateWorldMatrix(true, false);
+      this.updateWorldMatrix(true, false);
+      inverseRoot.copy(lightRoot.matrixWorld).invert();
+      for (const state of states) {
+        state.objectMatrix.multiplyMatrices(inverseRoot, this.matrixWorld);
+        state.objectNormalMatrix.getNormalMatrix(state.objectMatrix);
+      }
+    };
+  });
 }
 
 export function clearModel(message) {
