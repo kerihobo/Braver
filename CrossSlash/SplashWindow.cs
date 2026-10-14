@@ -85,15 +85,7 @@ namespace CrossSlash {
             Grid.SetColumn(browse, 2);
             sourceRow.Children.Add(browse);
 
-            var sourcePicker = new Border {
-                Background = DesktopUi.SurfaceBrush,
-                BorderBrush = DesktopUi.ControlBorderBrush,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(14),
-                Margin = new Thickness(0, 0, 0, 14),
-                Child = sourceRow,
-            };
+            sourceRow.Margin = new Thickness(0, 0, 0, 20);
 
             var view = new ContentControl {
                 Content = CreateStatus(savedFile || savedFolder
@@ -106,7 +98,7 @@ namespace CrossSlash {
             var content = new Grid { Margin = new Thickness(8) };
             content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            content.Children.Add(sourcePicker);
+            content.Children.Add(sourceRow);
             Grid.SetRow(view, 1);
             content.Children.Add(view);
 

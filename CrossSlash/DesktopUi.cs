@@ -53,12 +53,12 @@ namespace CrossSlash {
             ApplyThemeResources(window);
 
             UIElement body = scrollContent
-                ? CreateCard(new ScrollViewer {
+                ? new ScrollViewer {
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                     Padding = new Thickness(0),
                     Content = content,
-                })
+                }
                 : content;
             window.Content = body;
         }
@@ -372,7 +372,8 @@ namespace CrossSlash {
             hover.Setters.Add(new Setter(Border.BackgroundProperty, SurfaceRaised, "tabBorder"));
             template.Triggers.Add(hover);
             var selected = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
-            selected.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
+            selected.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceRaised));
+            selected.Setters.Add(new Setter(Border.BackgroundProperty, SurfaceRaised, "tabBorder"));
             selected.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
             template.Triggers.Add(selected);
 
@@ -386,20 +387,11 @@ namespace CrossSlash {
             style.Setters.Add(new Setter(FrameworkElement.CursorProperty, System.Windows.Input.Cursors.Hand));
             style.Setters.Add(new Setter(Control.TemplateProperty, template));
             var selectedStyle = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
-            selectedStyle.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
+            selectedStyle.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceRaised));
             selectedStyle.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
             style.Triggers.Add(selectedStyle);
             return style;
         }
-
-        public static Border CreateCard(UIElement content) => new() {
-            Background = Surface,
-            BorderBrush = ControlBorder,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(14),
-            Child = content,
-        };
 
         public static Button CreateButton(string text, bool primary = false) {
             var button = new Button {
