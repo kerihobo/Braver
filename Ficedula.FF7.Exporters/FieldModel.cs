@@ -9,10 +9,16 @@ using Ficedula;
 using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
 using System.Numerics;
+using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Ficedula.FF7.Exporters {
     public class FieldModel : ModelBase {
+        private const string FieldAnimationUsageResourceName = "Ficedula.FF7.Exporters.Data.FieldAnimationUsage.json";
+        private static readonly Lazy<IReadOnlyDictionary<string, HashSet<string>>> _fieldAnimationUsage =
+            new(LoadFieldAnimationUsage);
         private DataSource _data;
+        private readonly ConcurrentDictionary<int, IReadOnlyList<string>> _compatibleAnimationsByBoneCount = new();
 
         public FieldModel(DataSource data, ModelBaseOptions options) {
             _data = data;
@@ -24,6 +30,10 @@ namespace Ficedula.FF7.Exporters {
         }
 
         public IReadOnlyList<string> FindCompatibleAnimations(string modelHRC, IEnumerable<string> animationFiles) {
+            List<string> files = animationFiles.ToList();
+            if (TryFindMappedAnimations(modelHRC, files, out var mappedAnimations))
+                return mappedAnimations;
+
             int modelBoneCount;
             using (var hrc = _data.Open(modelHRC)) {
                 string[] lines = hrc.ReadAllLines().ToArray();
@@ -32,9 +42,45 @@ namespace Ficedula.FF7.Exporters {
                     modelBoneCount = 1;
             }
 
-            return animationFiles
-                .Where(file => HasCompatibleSkeleton(file, modelBoneCount))
+            return FindCompatibleAnimations(modelHRC, files, modelBoneCount);
+        }
+
+        private IReadOnlyList<string> FindCompatibleAnimations(string modelHRC, List<string> animationFiles, int modelBoneCount) {
+            if (TryFindMappedAnimations(modelHRC, animationFiles, out var mappedAnimations))
+                return mappedAnimations;
+
+            return _compatibleAnimationsByBoneCount.GetOrAdd(
+                modelBoneCount,
+                count => animationFiles.Where(file => HasCompatibleSkeleton(file, count)).ToList()
+            );
+        }
+
+        private static bool TryFindMappedAnimations(string modelHRC, IEnumerable<string> animationFiles, out IReadOnlyList<string> mappedAnimations) {
+            string modelId = Path.GetFileNameWithoutExtension(modelHRC) ?? string.Empty;
+            if (!_fieldAnimationUsage.Value.TryGetValue(modelId, out var usedAnimations)) {
+                mappedAnimations = Array.Empty<string>();
+                return false;
+            }
+
+            mappedAnimations = animationFiles
+                .Where(file => usedAnimations.Contains(Path.GetFileNameWithoutExtension(file) ?? string.Empty))
                 .ToList();
+            return true;
+        }
+
+        private static IReadOnlyDictionary<string, HashSet<string>> LoadFieldAnimationUsage() {
+            using Stream? stream = typeof(FieldModel).Assembly.GetManifestResourceStream(FieldAnimationUsageResourceName);
+            if (stream == null)
+                throw new InvalidOperationException($"Missing embedded field animation map: {FieldAnimationUsageResourceName}");
+
+            var entries = JsonSerializer.Deserialize<Dictionary<string, string[]>>(stream)
+                ?? throw new InvalidDataException("The embedded field animation map is empty or invalid.");
+
+            return entries.ToDictionary(
+                entry => entry.Key,
+                entry => new HashSet<string>(entry.Value, StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase
+            );
         }
 
         public SharpGLTF.Schema2.ModelRoot BuildScene(
@@ -43,15 +89,17 @@ namespace Ficedula.FF7.Exporters {
             bool compatibleAnimationsOnly,
             out IReadOnlyList<string> usedAnimations,
             bool includeMeshes = true,
-            bool includeAnimations = true) {
+            bool includeAnimations = true,
+            int? maxAnimationCount = null,
+            bool useFirstAnimationFrameAsBindPose = false) {
             var scene = new SceneBuilder();
             var model = new Field.HRCModel(_data.Open, modelHRC);
             var animationFiles = animFiles.ToList();
             if (compatibleAnimationsOnly) {
-                animationFiles = animationFiles
-                    .Where(file => HasCompatibleSkeleton(file, model.Bones.Count))
-                    .ToList();
+                animationFiles = FindCompatibleAnimations(modelHRC, animationFiles, model.Bones.Count).ToList();
             }
+            if (maxAnimationCount.HasValue)
+                animationFiles = animationFiles.Take(Math.Max(0, maxAnimationCount.Value)).ToList();
 
             var animations = animationFiles
                 .Select(file => new { Anim = new Field.FieldAnim(_data.Open(file)), Name = Path.GetFileNameWithoutExtension(file) })
@@ -69,7 +117,9 @@ namespace Ficedula.FF7.Exporters {
                 : new Dictionary<TexFile, MaterialBuilder>();
             MaterialBuilder defMaterial = GetUntexturedMaterial();
 
-            var firstFrame = animations.FirstOrDefault()?.Anim.Frames.FirstOrDefault();
+            var firstFrame = useFirstAnimationFrameAsBindPose
+                ? animations.FirstOrDefault()?.Anim.Frames.FirstOrDefault()
+                : null;
             var allNodes = new Dictionary<string, NodeBuilder>();
             var sourceNodes = new Dictionary<string, HRCModel.Bone>();
 
@@ -122,6 +172,12 @@ namespace Ficedula.FF7.Exporters {
             }
 
             var rootContainer = new NodeBuilder("RootContainer");
+            rootContainer.LocalTransform = SharpGLTF.Transforms.AffineTransform.CreateFromAny(
+                null,
+                new Vector3(_options.Scale),
+                Quaternion.Identity,
+                Vector3.Zero
+            );
             var root = rootContainer.CreateNode("root");
             Descend(scene, model.Root, root, Vector3.Zero, null);
             if (includeMeshes) {

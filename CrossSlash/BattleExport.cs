@@ -1,4 +1,4 @@
-﻿// This program and the accompanying materials are made available under the terms of the
+// This program and the accompanying materials are made available under the terms of the
 //  Eclipse Public License v2.0 which accompanies this distribution, and is available at
 //  https://www.eclipse.org/legal/epl-v20.html
 //  
@@ -53,8 +53,12 @@ namespace CrossSlash {
         private readonly ModelPreviewControl _modelPreview;
         private readonly DispatcherTimer _previewTimer;
         private Grid? _previewHost;
+        private Grid? _battleModelPreviewHost, _battlefieldPreviewHost;
+        private bool _previewBattlefield;
         private readonly TextBox _txtModelSearch, _txtScale, _txtBattlefield;
         private readonly ListBox _lstModels, _lstBattlefields;
+        private readonly AnimationPickerState _battleAnimations;
+        private AnimationPickerState? _activeAnimations;
         private readonly List<string> _modelCodes;
         private readonly List<string> _battlefieldCodes;
         private readonly ICollectionView _modelView;
@@ -93,6 +97,7 @@ namespace CrossSlash {
             };
             if (_lstModels.Items.Count > 0)
                 _lstModels.SelectedIndex = 0;
+            _battleAnimations = CreateAnimationPickerState();
             _lstBattlefields = new ListBox {
                 ItemsSource = _battlefieldCodes,
                 MinHeight = 150,
@@ -122,11 +127,10 @@ namespace CrossSlash {
             _txtScale.TextChanged += (_, _) => SchedulePreview();
             _exportOptions = new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 16),
-                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations },
+                Children = { DesktopUi.CreateScaleOption(_txtScale), _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations },
             };
 
             var content = new StackPanel();
-            content.Children.Add(DesktopUi.CreateFormRow("Scale", _txtScale));
 
             if (_magicModels)
             {
@@ -154,28 +158,41 @@ namespace CrossSlash {
 
         private UIElement CreateBattleModelContent() {
             var panel = new StackPanel();
-            panel.Children.Add(DesktopUi.CreateSectionTitle("Battle models"));
-            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Search the list and select a model to export."));
 
             var columns = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.34, GridUnitType.Star) });
-            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.66, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.28, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.30, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.42, GridUnitType.Star) });
             var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
-            modelColumn.Children.Add(DesktopUi.CreateFormRow("Available models", CreateModelPicker()));
+            modelColumn.Children.Add(DesktopUi.CreateSectionTitle($"Models ({_modelCodes.Count:N0})"));
+            modelColumn.Children.Add(CreateModelPicker());
             columns.Children.Add(modelColumn);
+
+            var animationColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            animationColumn.Children.Add(_battleAnimations.Title);
+            animationColumn.Children.Add(DesktopUi.CreateSearchField("Search animations…", _battleAnimations.Search));
+            animationColumn.Children.Add(_battleAnimations.List);
+            Grid.SetColumn(animationColumn, 1);
+            columns.Children.Add(animationColumn);
 
             var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
             previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
             var previewHost = new Grid { Height = 340 };
             previewColumn.Children.Add(previewHost);
-            Grid.SetColumn(previewColumn, 1);
+            Grid.SetColumn(previewColumn, 2);
             columns.Children.Add(previewColumn);
+            _battleModelPreviewHost = previewHost;
             MovePreviewTo(previewHost);
 
-            _lstModels.SelectionChanged += (_, _) => SchedulePreview();
-            if (_lstModels.SelectedItem is string)
+            _lstModels.SelectionChanged += (_, _) => {
+                RefreshAnimationPicker(_battleAnimations, _lstModels.SelectedItem as string);
                 SchedulePreview();
-            panel.Children.Add(columns);
+            };
+            if (_lstModels.SelectedItem is string) {
+                RefreshAnimationPicker(_battleAnimations, _lstModels.SelectedItem as string);
+                SchedulePreview();
+            }
+            panel.Children.Add(CreateContentContainer(columns));
 
             var export = DesktopUi.CreateButton("Export model", primary: true);
             export.Click += (_, _) => BtnExport_Clicked();
@@ -189,10 +206,28 @@ namespace CrossSlash {
 
         private UIElement CreateBattlefieldContent() {
             var panel = new StackPanel();
-            panel.Children.Add(DesktopUi.CreateSectionTitle("Battlefields"));
-            panel.Children.Add(DesktopUi.CreateHint($"{_battlefieldCodes.Count:N0} battlefield skeletons detected. Select one or enter a location code manually."));
-            panel.Children.Add(DesktopUi.CreateFormRow("Available battlefields", _lstBattlefields));
-            panel.Children.Add(DesktopUi.CreateFormRow("Location code", _txtBattlefield));
+
+            var columns = new Grid();
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.36, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.64, GridUnitType.Star) });
+            var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
+            modelColumn.Children.Add(DesktopUi.CreateSectionTitle($"Battlefields ({_battlefieldCodes.Count:N0})"));
+            modelColumn.Children.Add(_lstBattlefields);
+            modelColumn.Children.Add(DesktopUi.CreateFormRow("Location code", _txtBattlefield));
+            columns.Children.Add(modelColumn);
+
+            var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
+            var previewHost = new Grid { Height = 340 };
+            previewColumn.Children.Add(previewHost);
+            Grid.SetColumn(previewColumn, 1);
+            columns.Children.Add(previewColumn);
+            _battlefieldPreviewHost = previewHost;
+            _txtBattlefield.TextChanged += (_, _) => {
+                if (_previewBattlefield)
+                    SchedulePreview();
+            };
+            panel.Children.Add(CreateContentContainer(columns));
 
             var export = DesktopUi.CreateButton("Export battlefield", primary: true);
             export.Click += (_, _) => BtnExportBattlefield_Clicked();
@@ -227,10 +262,12 @@ namespace CrossSlash {
             if (modelList.Items.Count > 0)
                 modelList.SelectedIndex = 0;
 
+            AnimationPickerState animations = CreateAnimationPickerState();
             var panel = new StackPanel();
-            var columns = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.34, GridUnitType.Star) });
-            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.66, GridUnitType.Star) });
+            var columns = new Grid();
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.28, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.30, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.42, GridUnitType.Star) });
 
             var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
             modelColumn.Children.Add(DesktopUi.CreateSectionTitle($"Models ({modelCodes.Count:N0})"));
@@ -238,14 +275,26 @@ namespace CrossSlash {
             modelColumn.Children.Add(modelList);
             columns.Children.Add(modelColumn);
 
+            var animationColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            animationColumn.Children.Add(animations.Title);
+            animationColumn.Children.Add(DesktopUi.CreateSearchField("Search animations…", animations.Search));
+            animationColumn.Children.Add(animations.List);
+            Grid.SetColumn(animationColumn, 1);
+            columns.Children.Add(animationColumn);
+
             var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
             previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
             var previewHost = new Grid { Height = 340 };
             previewColumn.Children.Add(previewHost);
-            Grid.SetColumn(previewColumn, 1);
+            Grid.SetColumn(previewColumn, 2);
             columns.Children.Add(previewColumn);
-            panel.Children.Add(columns);
-            modelList.SelectionChanged += (_, _) => SchedulePreview();
+            panel.Children.Add(CreateContentContainer(columns));
+            modelList.SelectionChanged += (_, _) => {
+                if (ReferenceEquals(_activeAnimations, animations)) {
+                    RefreshAnimationPicker(animations, modelList.SelectedItem as string);
+                    SchedulePreview();
+                }
+            };
 
             var export = DesktopUi.CreateButton("Export selected", primary: true);
             export.Click += (_, _) => BtnExport_Clicked();
@@ -258,7 +307,7 @@ namespace CrossSlash {
             return new TabItem {
                 Header = group,
                 Content = panel,
-                Tag = new MagicModelTabState(group, modelCodes, modelList, panel, previewHost),
+                Tag = new MagicModelTabState(group, modelCodes, modelList, animations, panel, previewHost),
             };
         }
 
@@ -269,12 +318,44 @@ namespace CrossSlash {
             _activeMagicModelGroup = state.Group;
             _activeMagicModelCodes = state.ModelCodes;
             _activeMagicModelList = state.ModelList;
+            _activeAnimations = state.Animations;
+            _previewBattlefield = false;
             MovePreviewTo(state.PreviewHost);
+            RefreshAnimationPicker(state.Animations, state.ModelList.SelectedItem as string);
             MoveExportOptionsTo(state.Panel);
             SchedulePreview();
         }
 
-        private sealed record MagicModelTabState(string Group, List<string> ModelCodes, ListBox ModelList, StackPanel Panel, Grid PreviewHost);
+        private static Border CreateContentContainer(UIElement content) => new() {
+            Background = DesktopUi.SurfaceBrush,
+            BorderBrush = DesktopUi.ControlBorderBrush,
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(12),
+            Margin = new Thickness(0, 0, 0, 12),
+            Child = content,
+        };
+
+        private sealed class AnimationPickerState {
+            public AnimationPickerState(TextBlock title, TextBox search, ListBox list) {
+                Title = title;
+                Search = search;
+                List = list;
+            }
+
+            public TextBlock Title { get; }
+            public TextBox Search { get; }
+            public ListBox List { get; }
+            public IReadOnlyList<string> Names { get; set; } = Array.Empty<string>();
+            public HashSet<int> SelectedIndices { get; } = new();
+            public string? ModelCode { get; set; }
+            public long LookupRequest;
+            public bool LookupPending;
+            public bool Loaded;
+            public bool Refreshing;
+            public int? PreviewIndex;
+        }
+
+        private sealed record MagicModelTabState(string Group, List<string> ModelCodes, ListBox ModelList, AnimationPickerState Animations, StackPanel Panel, Grid PreviewHost);
 
         private void MovePreviewTo(Grid host) {
             if (ReferenceEquals(_previewHost, host))
@@ -287,10 +368,20 @@ namespace CrossSlash {
 
         private void MoveExportOptionsToSelectedTab(TabControl tabs) {
             if (tabs.SelectedItem is TabItem { Content: StackPanel panel } tab) {
-                _chkEmbedAnimations.Visibility = Equals(tab.Header, "Battlefields")
+                _previewBattlefield = Equals(tab.Header, "Battlefields");
+                _chkEmbedAnimations.Visibility = _previewBattlefield
                     ? Visibility.Collapsed
                     : Visibility.Visible;
+                if (_previewBattlefield && _battlefieldPreviewHost != null) {
+                    _activeAnimations = null;
+                    MovePreviewTo(_battlefieldPreviewHost);
+                } else if (_battleModelPreviewHost != null) {
+                    MovePreviewTo(_battleModelPreviewHost);
+                    _activeAnimations = _battleAnimations;
+                    RefreshAnimationPicker(_battleAnimations, _lstModels.SelectedItem as string);
+                }
                 MoveExportOptionsTo(panel);
+                SchedulePreview();
             }
         }
 
@@ -303,15 +394,200 @@ namespace CrossSlash {
             _optionsPanel = panel;
         }
 
+        private AnimationPickerState CreateAnimationPickerState() {
+            var state = new AnimationPickerState(
+                DesktopUi.CreateSectionTitle("Animations (0)"),
+                DesktopUi.CreateSearchTextBox("Search animations"),
+                new ListBox {
+                    ItemsSource = Array.Empty<string>(),
+                    SelectionMode = SelectionMode.Multiple,
+                    MinHeight = 150,
+                    MaxHeight = 230,
+                    Background = DesktopUi.InputBackgroundBrush,
+                    Foreground = DesktopUi.TextPrimaryBrush,
+                    BorderBrush = DesktopUi.ControlBorderBrush,
+                    BorderThickness = new Thickness(1),
+                    Padding = new Thickness(4),
+                    IsEnabled = false,
+                    ToolTip = "Left-click an animation to preview it. Right-click to preview it and include or exclude it from export.",
+                }
+            );
+            state.Search.TextChanged += (_, _) => RefreshAnimationList(state);
+            state.List.SelectionChanged += (_, e) => {
+                if (state.Refreshing)
+                    return;
+                foreach (string name in e.RemovedItems.Cast<string>())
+                    if (TryGetAnimationIndex(name, out int index))
+                        state.SelectedIndices.Remove(index);
+                foreach (string name in e.AddedItems.Cast<string>())
+                    if (TryGetAnimationIndex(name, out int index))
+                        state.SelectedIndices.Add(index);
+            };
+            state.List.PreviewMouseLeftButtonDown += (sender, e) => {
+                if (!TryGetAnimationItem(state.List, e.OriginalSource as DependencyObject, out _, out string name))
+                    return;
+                PreviewAnimation(state, name);
+                e.Handled = true;
+            };
+            state.List.PreviewMouseRightButtonDown += (_, e) => {
+                if (!TryGetAnimationItem(state.List, e.OriginalSource as DependencyObject, out ListBoxItem? item, out string name))
+                    return;
+                PreviewAnimation(state, name);
+                item!.IsSelected = !item.IsSelected;
+                e.Handled = true;
+            };
+            return state;
+        }
+
+        private void RefreshAnimationPicker(AnimationPickerState state, string? modelCode) {
+            if (string.Equals(state.ModelCode, modelCode, StringComparison.OrdinalIgnoreCase) && (state.LookupPending || state.Loaded))
+                return;
+
+            state.ModelCode = modelCode;
+            state.SelectedIndices.Clear();
+            state.PreviewIndex = null;
+            state.Names = Array.Empty<string>();
+            state.Loaded = false;
+            long request = Interlocked.Increment(ref state.LookupRequest);
+            if (modelCode == null) {
+                state.LookupPending = false;
+                state.Title.Text = "Animations (0)";
+                state.Title.ToolTip = "Select a model to see its animations.";
+                RefreshAnimationList(state);
+                UpdateAnimationPickerControlState(state);
+                return;
+            }
+
+            state.LookupPending = true;
+            state.Title.Text = "Animations (…)";
+            state.Title.ToolTip = $"Finding animations for {modelCode}.";
+            RefreshAnimationList(state);
+            UpdateAnimationPickerControlState(state);
+            _ = LoadAnimationsAsync(state, modelCode, request);
+        }
+
+        private async Task LoadAnimationsAsync(AnimationPickerState state, string modelCode, long request) {
+            try {
+                DataSource source = _source;
+                IReadOnlyList<string> names = await Task.Run(() => {
+                    var exporter = new BattleModel(source, new BattleModelOptions());
+                    return exporter.BuildSceneAuto(modelCode, includeMeshes: false, includeAnimations: true)
+                        .LogicalAnimations
+                        .Select(animation => animation.Name ?? string.Empty)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .ToList();
+                });
+                if (request != Interlocked.Read(ref state.LookupRequest))
+                    return;
+
+                state.Names = names;
+                state.PreviewIndex = state.Names
+                    .Select(name => TryGetAnimationIndex(name, out int index) ? (int?)index : null)
+                    .FirstOrDefault(index => index.HasValue);
+                state.Title.Text = $"Animations ({state.Names.Count:N0})";
+                state.Title.ToolTip = state.Names.Count == 0
+                    ? $"No animations were found for {modelCode}."
+                    : $"Animations for {modelCode}. Left-click to preview; right-click to include or exclude from export.";
+            } catch (Exception ex) {
+                if (request != Interlocked.Read(ref state.LookupRequest))
+                    return;
+                state.Names = Array.Empty<string>();
+                state.PreviewIndex = null;
+                state.Title.Text = "Animations (0)";
+                state.Title.ToolTip = $"Could not load animations: {ex.Message}";
+            } finally {
+                if (request == Interlocked.Read(ref state.LookupRequest)) {
+                    state.LookupPending = false;
+                    state.Loaded = true;
+                    RefreshAnimationList(state);
+                    UpdateAnimationPickerControlState(state);
+                    if (ReferenceEquals(state, _activeAnimations))
+                        SchedulePreview();
+                }
+            }
+        }
+
+        private void RefreshAnimationList(AnimationPickerState state) {
+            state.Refreshing = true;
+            try {
+                string search = state.Search.Text;
+                state.List.ItemsSource = state.Names
+                    .Where(name => string.IsNullOrWhiteSpace(search) || name.Contains(search, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                foreach (string name in state.List.Items.Cast<string>()) {
+                    if (TryGetAnimationIndex(name, out int index) && state.SelectedIndices.Contains(index))
+                        state.List.SelectedItems.Add(name);
+                }
+            } finally {
+                state.Refreshing = false;
+            }
+        }
+
+        private static void UpdateAnimationPickerControlState(AnimationPickerState state) {
+            bool enabled = !state.LookupPending && state.Names.Count > 0;
+            state.Search.IsEnabled = enabled;
+            state.List.IsEnabled = enabled;
+        }
+
+        private void PreviewAnimation(AnimationPickerState state, string name) {
+            if (TryGetAnimationIndex(name, out int index)) {
+                state.PreviewIndex = index;
+                if (ReferenceEquals(state, _activeAnimations))
+                    SchedulePreview();
+            }
+        }
+
+        private static bool TryGetAnimationIndex(string name, out int index) {
+            index = -1;
+            return name.StartsWith("Anim", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(name.AsSpan(4), out index);
+        }
+
+        private static bool TryGetAnimationItem(ListBox list, DependencyObject? source, out ListBoxItem? item, out string animation) {
+            item = source == null ? null : ItemsControl.ContainerFromElement(list, source) as ListBoxItem;
+            if (item?.Content is string name) {
+                animation = name;
+                return true;
+            }
+            animation = string.Empty;
+            return false;
+        }
+
+        private static IReadOnlyCollection<int>? GetSelectedAnimationIndices(AnimationPickerState? state) =>
+            state != null && state.SelectedIndices.Count > 0
+                ? state.SelectedIndices.OrderBy(index => index).ToArray()
+                : null;
+
         private void SchedulePreview() {
             _previewTimer.Stop();
             _previewTimer.Start();
         }
 
         private void RefreshPreview() {
+            if (_previewBattlefield) {
+                string locationCode = _txtBattlefield.Text.Trim();
+                if (string.IsNullOrWhiteSpace(locationCode)) {
+                    _modelPreview.ShowMessage("Select a battlefield to preview");
+                    return;
+                }
+                if (!float.TryParse(_txtScale.Text, out float battlefieldScale)) {
+                    _modelPreview.ShowMessage("Enter a valid scale to preview this battlefield");
+                    return;
+                }
+                DataSource battlefieldSource = _source;
+                BattleModelOptions battlefieldOptions = GetOptions(battlefieldScale);
+                _modelPreview.ShowModel(() => new BattleModel(battlefieldSource, battlefieldOptions)
+                    .BuildSceneFromBattleLocation(locationCode), locationCode, cameraZoom: 1.4f);
+                return;
+            }
+
             ListBox? modelList = _magicModels ? _activeMagicModelList : _lstModels;
             if (modelList?.SelectedItem is not string modelCode) {
                 _modelPreview.ShowMessage("Select a model to preview");
+                return;
+            }
+            if (_activeAnimations?.LookupPending == true) {
+                _modelPreview.ShowMessage("Finding animations…");
                 return;
             }
             if (!float.TryParse(_txtScale.Text, out float scale)) {
@@ -319,13 +595,15 @@ namespace CrossSlash {
                 return;
             }
 
-            try {
-                var exporter = new BattleModel(_source, GetOptions(scale));
-                var model = exporter.BuildSceneAuto(modelCode, includeAnimations: true);
-                _modelPreview.ShowModel(model, modelCode);
-            } catch (Exception ex) {
-                _modelPreview.ShowMessage($"Could not preview {modelCode}: {ex.Message}");
-            }
+            DataSource source = _source;
+            BattleModelOptions options = GetOptions(scale);
+            int? previewAnimationIndex = _activeAnimations?.PreviewIndex;
+            _modelPreview.ShowModel(() => {
+                var exporter = new BattleModel(source, options);
+                if (previewAnimationIndex.HasValue)
+                    return exporter.BuildSceneAuto(modelCode, includeAnimations: true, animationIndices: new[] { previewAnimationIndex.Value });
+                return exporter.BuildSceneAuto(modelCode, includeAnimations: true, maxAnimationCount: 1);
+            }, modelCode);
         }
 
         private UIElement CreateModelPicker() {
@@ -351,7 +629,9 @@ namespace CrossSlash {
 
                 var options = GetOptions(scale);
                 var exporter = new BattleModel(_source, options);
-                var model = exporter.BuildSceneAuto(modelCode, includeAnimations: _chkEmbedAnimations.IsChecked == true);
+                bool embedAnimations = _chkEmbedAnimations.IsChecked == true;
+                var animationIndices = embedAnimations ? GetSelectedAnimationIndices(_activeAnimations) : null;
+                var model = exporter.BuildSceneAuto(modelCode, includeAnimations: embedAnimations, animationIndices: animationIndices);
                 model.SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
                 string animationSummary = _chkEmbedAnimations.IsChecked == true
@@ -395,7 +675,9 @@ namespace CrossSlash {
                 foreach (string code in modelCodes) {
                     try {
                         var exporter = new BattleModel(_source, GetOptions(scale));
-                        var model = exporter.BuildSceneAuto(code, includeAnimations: _chkEmbedAnimations.IsChecked == true);
+                        bool embedAnimations = _chkEmbedAnimations.IsChecked == true;
+                        var animationIndices = embedAnimations ? GetSelectedAnimationIndices(_activeAnimations) : null;
+                        var model = exporter.BuildSceneAuto(code, includeAnimations: embedAnimations, animationIndices: animationIndices);
                         model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
                         animationCount += model.LogicalAnimations.Count;
                         exported++;

@@ -1,4 +1,4 @@
-﻿// This program and the accompanying materials are made available under the terms of the
+// This program and the accompanying materials are made available under the terms of the
 //  Eclipse Public License v2.0 which accompanies this distribution, and is available at
 //  https://www.eclipse.org/legal/epl-v20.html
 //  
@@ -31,6 +31,7 @@ namespace Ficedula.FF7 {
 
         private Stream _source;
         private Dictionary<string, Entry> _entries;
+        private readonly object _sourceLock = new();
 
         public IEnumerable<string> Filenames => _entries.Select(e => e.Value.FullPath);
 
@@ -79,13 +80,14 @@ namespace Ficedula.FF7 {
 
         public Stream? TryOpen(string name) {
             if (_entries.TryGetValue(name, out Entry? e)) {
-                _source.Position = e.Offset + 20;
-                int length = _source.ReadI32();
-                //TODO: don't always load into memory, support passthrough reading from source?
-                byte[] buffer = new byte[length];
-                _source.Read(buffer, 0, length);
-                var mem = new MemoryStream(buffer);
-                return mem;
+                lock (_sourceLock) {
+                    _source.Position = e.Offset + 20;
+                    int length = _source.ReadI32();
+                    //TODO: don't always load into memory, support passthrough reading from source?
+                    byte[] buffer = new byte[length];
+                    _source.Read(buffer, 0, length);
+                    return new MemoryStream(buffer);
+                }
             } else
                 return null;
         }
@@ -98,7 +100,8 @@ namespace Ficedula.FF7 {
         }
 
         public void Dispose() {
-            _source.Dispose();
+            lock (_sourceLock)
+                _source.Dispose();
         }
 
         public override string ToString() => $"LGP {_source}";

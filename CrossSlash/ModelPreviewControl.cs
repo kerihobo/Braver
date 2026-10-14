@@ -15,9 +15,13 @@ namespace CrossSlash {
     internal sealed class ModelPreviewControl : UserControl {
         private readonly WebView2 _webView;
         private readonly TextBlock _status;
+        private readonly SemaphoreSlim _buildGate = new(1, 1);
         private string? _pendingMessage;
+        private string? _pendingLightingMessage;
         private bool _initializationStarted;
         private bool _pageReady;
+        private bool _viewerPreparationPending;
+        private long _modelRequest;
 
         public ModelPreviewControl() {
             _webView = new WebView2 {
@@ -53,23 +57,56 @@ namespace CrossSlash {
             Loaded += InitializeWebView;
         }
 
-        public void ShowModel(ModelRoot model, string name) {
+        public void ShowModel(Func<ModelRoot> buildModel, string name, object? lighting = null, float cameraZoom = 1.2f) {
+            long request = Interlocked.Increment(ref _modelRequest);
+            _pendingMessage = null;
+            _status.Text = $"Loading {name} preview…";
+            _status.Visibility = Visibility.Visible;
+            RequestViewerPreparation();
+            _ = PrepareModelPreviewAsync(buildModel, name, lighting, cameraZoom, request);
+        }
+
+        public void PrepareViewer() => RequestViewerPreparation();
+
+        public void UpdateLighting(object? lighting) {
+            _pendingLightingMessage = JsonSerializer.Serialize(new {
+                type = "update-lighting",
+                lighting,
+            });
+            SendPendingMessage();
+        }
+
+        private async Task PrepareModelPreviewAsync(Func<ModelRoot> buildModel, string name, object? lighting, float cameraZoom, long request) {
+            await _buildGate.WaitAsync();
             try {
-                byte[] glb = model.WriteGLB().ToArray();
+                if (request != Interlocked.Read(ref _modelRequest))
+                    return;
+
+                string glbBase64 = await Task.Run(() => {
+                    ModelRoot model = buildModel();
+                    return Convert.ToBase64String(model.WriteGLB().ToArray());
+                });
+                if (request != Interlocked.Read(ref _modelRequest))
+                    return;
+
                 _pendingMessage = JsonSerializer.Serialize(new {
                     type = "load-model",
                     name,
-                    glbBase64 = Convert.ToBase64String(glb),
+                    glbBase64,
+                    lighting,
+                    cameraZoom,
                 });
-                _status.Text = "Preparing model preview…";
-                _status.Visibility = Visibility.Visible;
                 SendPendingMessage();
             } catch (Exception ex) {
-                ShowError($"Could not prepare the preview: {ex.Message}");
+                if (request == Interlocked.Read(ref _modelRequest))
+                    ShowError($"Could not prepare the preview: {ex.Message}");
+            } finally {
+                _buildGate.Release();
             }
         }
 
         public void ShowMessage(string message) {
+            Interlocked.Increment(ref _modelRequest);
             _pendingMessage = JsonSerializer.Serialize(new { type = "clear", message });
             _status.Text = message;
             _status.Visibility = Visibility.Visible;
@@ -120,6 +157,7 @@ namespace CrossSlash {
                 if (type == "viewer-ready") {
                     _pageReady = true;
                     _status.Visibility = Visibility.Collapsed;
+                    SendViewerPreparation();
                     SendPendingMessage();
                     _webView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new {
                         type = "visibility",
@@ -148,12 +186,36 @@ namespace CrossSlash {
 
         private void SendPendingMessage() {
             if (!_pageReady || _pendingMessage == null || _webView.CoreWebView2 == null)
+            {
+                SendPendingLightingMessage();
                 return;
+            }
             _webView.CoreWebView2.PostWebMessageAsJson(_pendingMessage);
             _pendingMessage = null;
+            SendPendingLightingMessage();
+        }
+
+        private void SendPendingLightingMessage() {
+            if (!_pageReady || _pendingLightingMessage == null || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(_pendingLightingMessage);
+            _pendingLightingMessage = null;
+        }
+
+        private void RequestViewerPreparation() {
+            _viewerPreparationPending = true;
+            SendViewerPreparation();
+        }
+
+        private void SendViewerPreparation() {
+            if (!_viewerPreparationPending || !_pageReady || _webView.CoreWebView2 == null)
+                return;
+            _viewerPreparationPending = false;
+            _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new { type = "prepare-viewer" }));
         }
 
         private void ShowError(string message) {
+            Interlocked.Increment(ref _modelRequest);
             _pendingMessage = JsonSerializer.Serialize(new { type = "clear", message });
             _status.Text = message;
             _status.Visibility = Visibility.Visible;

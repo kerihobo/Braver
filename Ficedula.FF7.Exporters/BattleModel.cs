@@ -17,7 +17,6 @@ using System.Threading.Tasks;
 namespace Ficedula.FF7.Exporters {
 
     public class BattleModelOptions : ModelBaseOptions {
-        public float Scale { get; set; } = 1f;
     }
 
     public class BattleModel : ModelBase {
@@ -31,12 +30,37 @@ namespace Ficedula.FF7.Exporters {
             _options = options;
         }
 
-        private SharpGLTF.Schema2.ModelRoot BuildScene(string skeleton, string anims, IEnumerable<string> texs, Func<string?> nextFile, IReadOnlyList<(string Name, PFile Model)>? weaponParts = null, int bodyAnimationCount = 0, int weaponAnimationCount = 0, bool includeMeshes = true, bool includeAnimations = true) {
+        private SharpGLTF.Schema2.ModelRoot BuildScene(string skeleton, string anims, IEnumerable<string> texs, Func<string?> nextFile, IReadOnlyList<(string Name, PFile Model)>? weaponParts = null, int bodyAnimationCount = 0, int weaponAnimationCount = 0, bool includeMeshes = true, bool includeAnimations = true, int? maxAnimationCount = null, IReadOnlyCollection<int>? animationIndices = null) {
             var scene = new SceneBuilder();
 
             Animations animations;
+            IReadOnlySet<int>? includedAnimationIndices = null;
+            if (animationIndices != null) {
+                var indices = animationIndices.Where(index => index >= 0).ToHashSet();
+                indices.Add(0); // The first body pose supplies the skeleton's initial transforms.
+                if (weaponParts?.Count > 0) {
+                    if (weaponAnimationCount > 0)
+                        indices.Add(bodyAnimationCount); // The first weapon pose supplies its initial transform.
+                    foreach (int index in animationIndices.Where(index => index >= 0 && index < bodyAnimationCount && index < weaponAnimationCount))
+                        indices.Add(bodyAnimationCount + index);
+                }
+                includedAnimationIndices = indices;
+            } else if (maxAnimationCount.HasValue) {
+                var indices = new HashSet<int> { 0 };
+                int count = Math.Max(0, maxAnimationCount.Value);
+                if (weaponParts?.Count > 0) {
+                    for (int i = 0; i < Math.Min(count, bodyAnimationCount); i++)
+                        indices.Add(i);
+                    for (int i = 0; i < Math.Min(count, weaponAnimationCount); i++)
+                        indices.Add(bodyAnimationCount + i);
+                } else {
+                    for (int i = 0; i < count; i++)
+                        indices.Add(i);
+                }
+                includedAnimationIndices = indices;
+            }
             using (var s = _source.Open(anims))
-                animations = new Animations(s);
+                animations = new Animations(s, includedAnimationIndices);
             BBone rootBone;
             using(var s = _source.Open(skeleton))
                 rootBone = BBone.Decode(s);
@@ -162,7 +186,11 @@ namespace Ficedula.FF7.Exporters {
 
             // Create animations for skeleton nodes (ones with numeric names) as before
             int numBodyAnimations = weaponParts?.Count > 0 ? bodyAnimationCount : animations.Anims.Count;
+            if (maxAnimationCount.HasValue)
+                numBodyAnimations = Math.Min(numBodyAnimations, Math.Max(0, maxAnimationCount.Value));
             for (int animationIndex = 0; includeAnimations && animationIndex < numBodyAnimations; animationIndex++) {
+                if (animationIndices != null && !animationIndices.Contains(animationIndex))
+                    continue;
                 var anim = animations.Anims[animationIndex];
                 if (anim == null)
                     continue;
@@ -170,7 +198,7 @@ namespace Ficedula.FF7.Exporters {
                     continue;
 
                 var mAnim = model.CreateAnimation();
-                mAnim.Name = "Anim" + (model.LogicalAnimations.Count - 1);
+                mAnim.Name = "Anim" + animationIndex;
 
                 var rootNode = model.LogicalNodes.FirstOrDefault(n => n.Name == "RootContainer");
                 if (rootNode != null) {
@@ -259,21 +287,21 @@ namespace Ficedula.FF7.Exporters {
             return model;
         }
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneAuto(string name, bool includeMeshes = true, bool includeAnimations = true) {
+        public SharpGLTF.Schema2.ModelRoot BuildSceneAuto(string name, bool includeMeshes = true, bool includeAnimations = true, int? maxAnimationCount = null, IReadOnlyCollection<int>? animationIndices = null) {
             if (_source.Exists(name + ".a00"))
-                return BuildSceneFromMagicModel(name, includeMeshes, includeAnimations);
+                return BuildSceneFromMagicModel(name, includeMeshes, includeAnimations, maxAnimationCount, animationIndices);
             else if (IsBattleLocation(_source, name))
                 return BuildSceneFromBattleLocation(name);
             else if (_source.Exists(name + "DA"))
-                return BuildSceneFromModel(name, includeMeshes, includeAnimations);
+                return BuildSceneFromModel(name, includeMeshes, includeAnimations, maxAnimationCount, animationIndices);
             else
                 throw new Exception($"Can't detect battle model type");
         }
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneFromSummon(string summonName, bool includeMeshes = true, bool includeAnimations = true) =>
-            BuildSceneFromMagicModel(summonName, includeMeshes, includeAnimations);
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromSummon(string summonName, bool includeMeshes = true, bool includeAnimations = true, int? maxAnimationCount = null, IReadOnlyCollection<int>? animationIndices = null) =>
+            BuildSceneFromMagicModel(summonName, includeMeshes, includeAnimations, maxAnimationCount, animationIndices);
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneFromMagicModel(string modelName, bool includeMeshes = true, bool includeAnimations = true) {
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromMagicModel(string modelName, bool includeMeshes = true, bool includeAnimations = true, int? maxAnimationCount = null, IReadOnlyCollection<int>? animationIndices = null) {
             //TODO - very similar to code in main Braver project - move into Ficedula.FF7
             var texs = Enumerable.Range(0, 99).Select(i => $"{modelName}.t{i:00}");
             int part = 0;
@@ -288,7 +316,7 @@ namespace Ficedula.FF7.Exporters {
                 return data;
             };
             return BuildScene(modelName + ".d", modelName + ".a00", texs, NextData,
-                includeMeshes: includeMeshes, includeAnimations: includeAnimations);
+                includeMeshes: includeMeshes, includeAnimations: includeAnimations, maxAnimationCount: maxAnimationCount, animationIndices: animationIndices);
         }
 
         public SharpGLTF.Schema2.ModelRoot BuildSceneFromBattleLocation(string locationCode) {
@@ -389,7 +417,7 @@ namespace Ficedula.FF7.Exporters {
             return locationCode + (char)('a' + suffixIndex / 26) + (char)('a' + suffixIndex % 26);
         }
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneFromModel(string modelCode, bool includeMeshes = true, bool includeAnimations = true) {
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromModel(string modelCode, bool includeMeshes = true, bool includeAnimations = true, int? maxAnimationCount = null, IReadOnlyCollection<int>? animationIndices = null) {
             //TODO - very similar to code in main Braver project - move into Ficedula.FF7
             var texs = Enumerable.Range((int)'c', 10).Select(i => modelCode + "a" + ((char)i).ToString());
             int codecounter = 12;
@@ -429,7 +457,7 @@ namespace Ficedula.FF7.Exporters {
             }
 
             return BuildScene(modelCode + "aa", modelCode + "da", texs, NextData, weaponParts,
-                bodyAnimationCount, weaponAnimationCount, includeMeshes, includeAnimations);
+                bodyAnimationCount, weaponAnimationCount, includeMeshes, includeAnimations, maxAnimationCount, animationIndices);
         }
     }
 }

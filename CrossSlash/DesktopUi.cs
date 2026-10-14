@@ -329,6 +329,7 @@ namespace CrossSlash {
             strip.SetValue(UIElement.ClipToBoundsProperty, false);
             strip.SetValue(Border.BackgroundProperty, TabStripBackground);
             strip.SetValue(Border.BorderThicknessProperty, new Thickness(0));
+            strip.SetValue(Border.PaddingProperty, new Thickness(0, 4, 0, 0));
             var tabPanel = new FrameworkElementFactory(typeof(TabPanel), "HeaderPanel");
             tabPanel.SetValue(Panel.IsItemsHostProperty, true);
             tabPanel.SetValue(Panel.ZIndexProperty, 1);
@@ -491,6 +492,19 @@ namespace CrossSlash {
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 16, 0),
         };
+
+        public static UIElement CreateScaleOption(TextBox textBox) {
+            textBox.Width = 88;
+            textBox.Height = 34;
+            var label = CreateLabel("Scale");
+            label.Margin = new Thickness(0, 0, 8, 0);
+            return new StackPanel {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 18, 8),
+                Children = { label, textBox },
+            };
+        }
 
         public static Grid CreateFormRow(string label, UIElement control, double labelWidth = 170) {
             var grid = new Grid { Margin = new Thickness(0, 0, 0, 14) };

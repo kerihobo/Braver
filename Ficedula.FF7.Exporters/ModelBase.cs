@@ -20,6 +20,7 @@ namespace Ficedula.FF7.Exporters {
         public bool ConvertSRGBToLinear { get; set; }
         public bool SwapWinding { get; set; }
         public bool BakeVertexColours { get; set; }
+        public float Scale { get; set; } = 1f;
     }
 
     public class ModelBase {

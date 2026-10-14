@@ -10,13 +10,13 @@
       <canvas id="model-canvas" aria-label="3D model preview"></canvas>
       <div id="empty-state">Choose a model to preview</div>
 
-      <div id="model-label" aria-live="polite"></div>
+      <div id="model-label" aria-live="polite">
+        <span id="model-name"></span>
+        <span id="animation-label" hidden></span>
+      </div>
 
       <section id="controls" aria-label="Animation controls">
         <div class="control-row">
-          <select id="animation-select" aria-label="Animation" disabled>
-            <option>No animations</option>
-          </select>
           <button id="play-button" type="button" disabled>Play</button>
           <button id="reset-button" type="button" disabled>Reset</button>
         </div>

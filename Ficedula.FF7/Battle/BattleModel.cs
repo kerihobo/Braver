@@ -1,4 +1,4 @@
-﻿// This program and the accompanying materials are made available under the terms of the
+// This program and the accompanying materials are made available under the terms of the
 //  Eclipse Public License v2.0 which accompanies this distribution, and is available at
 //  https://www.eclipse.org/legal/epl-v20.html
 //  
@@ -103,18 +103,18 @@ namespace Ficedula.FF7.Battle {
     public class Animations {
         public List<Animation> Anims;
 
-        public Animations(Stream source) {
+        public Animations(Stream source, IReadOnlySet<int>? includedAnimationIndices = null) {
             int parts = source.ReadI32();
             Anims = new List<Animation>();
 
             for (int i = 0; i < parts; i++) {
                 int hbones = source.ReadI32(), hframes = source.ReadI32(), hsize = source.ReadI32();
-                if (hsize < 11) {
+                long chunkstart = source.Position;
+                if (hsize < 11 || (includedAnimationIndices != null && !includedAnimationIndices.Contains(i))) {
                     Anims.Add(null);
-                    source.Seek(hsize, System.IO.SeekOrigin.Current);
+                    source.Position = chunkstart + hsize;
                     continue;
                 }
-                long chunkstart = source.Position;
                 short fframes = source.ReadI16(), fsize = source.ReadI16();
                 byte fkey = (byte)source.ReadByte();
                 Animation anim = new Animation() { Bones = hbones, Frames = new Frame[hframes] };

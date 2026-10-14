@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Data\FieldAnimationUsage.json" LogicalName="Ficedula.FF7.Exporters.Data.FieldAnimationUsage.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.0-alpha0030" />
     <PackageReference Include="SkiaSharp" Version="2.88.6" />
   </ItemGroup>

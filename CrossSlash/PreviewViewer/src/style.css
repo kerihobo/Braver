@@ -49,17 +49,30 @@ html, body, #viewer {
   position: absolute;
   top: 10px;
   left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   max-width: calc(100% - 24px);
   overflow: hidden;
-  padding: 5px 9px;
-  border: 1px solid #506171;
-  border-radius: 4px;
-  background: rgb(24 34 45 / 88%);
+  padding: 0;
   color: #e7edf3;
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  text-shadow: 0 1px 3px #000, 0 0 5px #000;
   pointer-events: none;
+}
+
+#model-label span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#animation-label {
+  color: #b3c0cc;
+  font-size: 11px;
 }
 
 #controls {
@@ -91,8 +104,6 @@ select { min-width: 0; padding: 3px 7px; }
 button { padding: 3px 10px; cursor: pointer; }
 button:hover:not(:disabled) { background: #344352; }
 button:disabled, select:disabled { opacity: 0.55; cursor: default; }
-
-#animation-select { flex: 1; }
 
 .timeline-row input[type="range"] {
   flex: 1;
