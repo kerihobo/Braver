@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace CrossSlash {
@@ -15,6 +16,7 @@ namespace CrossSlash {
         public static Window? MainWindow { get; set; }
 
         private static readonly Brush PageBackground = Brush("#202A35");
+        private static readonly Brush TabStripBackground = Brush("#18222D");
         private static readonly Brush Surface = Brush("#293643");
         private static readonly Brush SurfaceRaised = Brush("#344352");
         private static readonly Brush InputBackground = Brush("#222D38");
@@ -66,17 +68,22 @@ namespace CrossSlash {
             window.Resources[SystemColors.WindowTextBrushKey] = TextPrimary;
             window.Resources[SystemColors.ControlBrushKey] = SurfaceRaised;
             window.Resources[SystemColors.ControlLightBrushKey] = SurfaceRaised;
+            window.Resources[SystemColors.ControlDarkBrushKey] = ControlBorder;
+            window.Resources[SystemColors.ControlDarkDarkBrushKey] = PageBackground;
             window.Resources[SystemColors.ControlTextBrushKey] = TextPrimary;
             window.Resources[SystemColors.HighlightBrushKey] = Accent;
             window.Resources[SystemColors.HighlightTextBrushKey] = Brushes.White;
             window.Resources[SystemColors.GrayTextBrushKey] = TextSecondary;
             window.Resources[SystemColors.MenuBrushKey] = Surface;
             window.Resources[SystemColors.MenuTextBrushKey] = TextPrimary;
+            window.Resources[SystemColors.ScrollBarBrushKey] = SurfaceRaised;
             window.Resources[typeof(CheckBox)] = CreateCheckBoxStyle();
             window.Resources[typeof(ListBox)] = CreateListBoxStyle();
             window.Resources[typeof(ListBoxItem)] = CreateListBoxItemStyle();
             window.Resources[typeof(ComboBox)] = CreateComboBoxStyle();
             window.Resources[typeof(ComboBoxItem)] = CreateComboBoxItemStyle();
+            window.Resources[typeof(ScrollBar)] = CreateScrollBarStyle();
+            window.Resources[typeof(Thumb)] = CreateScrollThumbStyle();
             window.Resources[typeof(TabControl)] = CreateTabControlStyle();
             window.Resources[typeof(TabItem)] = CreateTabItemStyle();
         }
@@ -167,7 +174,96 @@ namespace CrossSlash {
             style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
             style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 6, 8, 6)));
             style.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            style.Setters.Add(new Setter(ItemsControl.ItemContainerStyleProperty, CreateComboBoxItemStyle()));
+            style.Setters.Add(new Setter(Control.TemplateProperty, CreateComboBoxTemplate()));
             return style;
+        }
+
+        private static ControlTemplate CreateComboBoxTemplate() {
+            var outerBorder = new FrameworkElementFactory(typeof(Border), "comboBorder");
+            outerBorder.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
+            outerBorder.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Control.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
+            outerBorder.SetBinding(Border.BorderThicknessProperty, new Binding(nameof(Control.BorderThickness)) { RelativeSource = RelativeSource.TemplatedParent });
+
+            var root = new FrameworkElementFactory(typeof(Grid));
+            root.AppendChild(outerBorder);
+
+            var selectedContent = new FrameworkElementFactory(typeof(ContentPresenter), "ContentSite");
+            selectedContent.SetValue(UIElement.IsHitTestVisibleProperty, false);
+            selectedContent.SetValue(FrameworkElement.MarginProperty, new Thickness(9, 0, 30, 0));
+            selectedContent.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            selectedContent.SetBinding(ContentPresenter.ContentProperty, new Binding(nameof(Selector.SelectedItem)) { RelativeSource = RelativeSource.TemplatedParent });
+            selectedContent.SetBinding(ContentPresenter.ContentTemplateProperty, new Binding(nameof(ItemsControl.ItemTemplate)) { RelativeSource = RelativeSource.TemplatedParent });
+            root.AppendChild(selectedContent);
+
+            var toggle = new FrameworkElementFactory(typeof(ToggleButton), "ToggleButton");
+            toggle.SetValue(FrameworkElement.WidthProperty, 28d);
+            toggle.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Right);
+            toggle.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Stretch);
+            toggle.SetValue(Control.BackgroundProperty, Brushes.Transparent);
+            toggle.SetValue(Control.BorderThicknessProperty, new Thickness(0));
+            toggle.SetValue(UIElement.FocusableProperty, false);
+            toggle.SetValue(ToggleButton.ClickModeProperty, ClickMode.Press);
+            toggle.SetBinding(ToggleButton.IsCheckedProperty, new Binding(nameof(ComboBox.IsDropDownOpen)) {
+                RelativeSource = RelativeSource.TemplatedParent,
+                Mode = BindingMode.TwoWay,
+            });
+
+            var toggleBorder = new FrameworkElementFactory(typeof(Border), "toggleBorder");
+            toggleBorder.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
+            var arrow = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
+            arrow.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse("M 0,0 L 4,4 L 8,0"));
+            arrow.SetValue(System.Windows.Shapes.Path.StrokeProperty, TextSecondary);
+            arrow.SetValue(System.Windows.Shapes.Path.StrokeThicknessProperty, 1.6d);
+            arrow.SetValue(FrameworkElement.WidthProperty, 8d);
+            arrow.SetValue(FrameworkElement.HeightProperty, 5d);
+            arrow.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            arrow.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            toggleBorder.AppendChild(arrow);
+            var toggleTemplate = new ControlTemplate(typeof(ToggleButton)) { VisualTree = toggleBorder };
+            var toggleHover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            toggleHover.Setters.Add(new Setter(Border.BackgroundProperty, SurfaceRaised, "toggleBorder"));
+            toggleTemplate.Triggers.Add(toggleHover);
+            toggle.SetValue(Control.TemplateProperty, toggleTemplate);
+            root.AppendChild(toggle);
+
+            var popupBorder = new FrameworkElementFactory(typeof(Border), "DropDownBorder");
+            popupBorder.SetValue(Border.BackgroundProperty, Surface);
+            popupBorder.SetValue(Border.BorderBrushProperty, ControlBorder);
+            popupBorder.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+            popupBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+            var popupScroll = new FrameworkElementFactory(typeof(ScrollViewer), "DropDownScrollViewer");
+            popupScroll.SetValue(ScrollViewer.BackgroundProperty, Surface);
+            popupScroll.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+            popupScroll.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+            popupScroll.SetValue(ScrollViewer.CanContentScrollProperty, true);
+            popupScroll.SetValue(FrameworkElement.MaxHeightProperty, 260d);
+            var items = new FrameworkElementFactory(typeof(ItemsPresenter), "ItemsPresenter");
+            items.SetValue(KeyboardNavigation.DirectionalNavigationProperty, KeyboardNavigationMode.Contained);
+            popupScroll.AppendChild(items);
+            popupBorder.AppendChild(popupScroll);
+
+            var popup = new FrameworkElementFactory(typeof(Popup), "PART_Popup");
+            popup.SetValue(Popup.AllowsTransparencyProperty, true);
+            popup.SetValue(Popup.PlacementProperty, PlacementMode.Bottom);
+            popup.SetValue(Popup.PopupAnimationProperty, PopupAnimation.Fade);
+            popup.SetValue(Popup.StaysOpenProperty, true);
+            popup.SetBinding(Popup.IsOpenProperty, new Binding(nameof(ComboBox.IsDropDownOpen)) { RelativeSource = RelativeSource.TemplatedParent });
+            popup.SetBinding(Popup.PlacementTargetProperty, new Binding { RelativeSource = RelativeSource.TemplatedParent });
+            popup.SetBinding(FrameworkElement.WidthProperty, new Binding(nameof(FrameworkElement.ActualWidth)) { RelativeSource = RelativeSource.TemplatedParent });
+            popup.AppendChild(popupBorder);
+            root.AppendChild(popup);
+
+            var template = new ControlTemplate(typeof(ComboBox)) { VisualTree = root };
+            template.Resources[typeof(ScrollBar)] = CreateScrollBarStyle();
+            template.Resources[typeof(Thumb)] = CreateScrollThumbStyle();
+            var focused = new Trigger { Property = UIElement.IsKeyboardFocusWithinProperty, Value = true };
+            focused.Setters.Add(new Setter(Border.BorderBrushProperty, Accent, "comboBorder"));
+            template.Triggers.Add(focused);
+            var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+            disabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.55));
+            template.Triggers.Add(disabled);
+            return template;
         }
 
         private static Style CreateComboBoxItemStyle() {
@@ -182,13 +278,88 @@ namespace CrossSlash {
             return style;
         }
 
+        private static Style CreateScrollBarStyle() {
+            var style = new Style(typeof(ScrollBar));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, InputBackground));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, TextSecondary));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+            style.Setters.Add(new Setter(FrameworkElement.WidthProperty, 10d));
+            style.Setters.Add(new Setter(FrameworkElement.HeightProperty, double.NaN));
+            var horizontalStyle = new Trigger { Property = ScrollBar.OrientationProperty, Value = Orientation.Horizontal };
+            horizontalStyle.Setters.Add(new Setter(FrameworkElement.WidthProperty, double.NaN));
+            horizontalStyle.Setters.Add(new Setter(FrameworkElement.HeightProperty, 10d));
+            style.Triggers.Add(horizontalStyle);
+            return style;
+        }
+
+        private static ControlTemplate CreateScrollThumbTemplate() {
+            var border = new FrameworkElementFactory(typeof(Border), "thumbBorder");
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+            border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Control.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetBinding(Border.BorderThicknessProperty, new Binding(nameof(Control.BorderThickness)) { RelativeSource = RelativeSource.TemplatedParent });
+            var template = new ControlTemplate(typeof(Thumb)) { VisualTree = border };
+            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            hover.Setters.Add(new Setter(Border.BackgroundProperty, Brush("#65788A"), "thumbBorder"));
+            template.Triggers.Add(hover);
+            var dragging = new Trigger { Property = Thumb.IsDraggingProperty, Value = true };
+            dragging.Setters.Add(new Setter(Border.BackgroundProperty, Accent, "thumbBorder"));
+            template.Triggers.Add(dragging);
+            return template;
+        }
+
+        private static Style CreateScrollThumbStyle() {
+            var style = new Style(typeof(Thumb));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceRaised));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+            style.Setters.Add(new Setter(Control.TemplateProperty, CreateScrollThumbTemplate()));
+            return style;
+        }
+
         private static Style CreateTabControlStyle() {
             var style = new Style(typeof(TabControl));
             style.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
             style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
             style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
             style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
+            style.Setters.Add(new Setter(Control.TemplateProperty, CreateTabControlTemplate()));
             return style;
+        }
+
+        private static ControlTemplate CreateTabControlTemplate() {
+            var root = new FrameworkElementFactory(typeof(DockPanel));
+            root.SetValue(DockPanel.LastChildFillProperty, true);
+            root.SetValue(KeyboardNavigation.TabNavigationProperty, KeyboardNavigationMode.Local);
+
+            var strip = new FrameworkElementFactory(typeof(Border), "tabStrip");
+            strip.SetValue(DockPanel.DockProperty, Dock.Top);
+            strip.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+            strip.SetValue(UIElement.ClipToBoundsProperty, false);
+            strip.SetValue(Border.BackgroundProperty, TabStripBackground);
+            strip.SetValue(Border.BorderBrushProperty, ControlBorder);
+            strip.SetValue(Border.BorderThicknessProperty, new Thickness(0, 0, 0, 1));
+            var tabPanel = new FrameworkElementFactory(typeof(TabPanel), "HeaderPanel");
+            tabPanel.SetValue(Panel.IsItemsHostProperty, true);
+            tabPanel.SetValue(Panel.ZIndexProperty, 1);
+            tabPanel.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+            tabPanel.SetValue(UIElement.ClipToBoundsProperty, false);
+            strip.AppendChild(tabPanel);
+            root.AppendChild(strip);
+
+            var contentBorder = new FrameworkElementFactory(typeof(Border), "ContentBorder");
+            contentBorder.SetValue(Border.BackgroundProperty, PageBackground);
+            var content = new FrameworkElementFactory(typeof(ContentPresenter), "PART_SelectedContentHost");
+            content.SetBinding(ContentPresenter.ContentProperty, new Binding("SelectedContent") { RelativeSource = RelativeSource.TemplatedParent });
+            content.SetBinding(ContentPresenter.ContentTemplateProperty, new Binding("SelectedContentTemplate") { RelativeSource = RelativeSource.TemplatedParent });
+            content.SetBinding(ContentPresenter.ContentTemplateSelectorProperty, new Binding("SelectedContentTemplateSelector") { RelativeSource = RelativeSource.TemplatedParent });
+            content.SetBinding(ContentPresenter.ContentStringFormatProperty, new Binding("SelectedContentStringFormat") { RelativeSource = RelativeSource.TemplatedParent });
+            content.SetBinding(FrameworkElement.MarginProperty, new Binding(nameof(Control.Padding)) { RelativeSource = RelativeSource.TemplatedParent });
+            contentBorder.AppendChild(content);
+            root.AppendChild(contentBorder);
+
+            return new ControlTemplate(typeof(TabControl)) { VisualTree = root };
         }
 
         private static Style CreateTabItemStyle() {
@@ -216,12 +387,12 @@ namespace CrossSlash {
             template.Triggers.Add(selected);
 
             var style = new Style(typeof(TabItem));
-            style.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceRaised));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
             style.Setters.Add(new Setter(Control.ForegroundProperty, TextSecondary));
             style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
             style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
             style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(14, 8, 14, 8)));
-            style.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0, 0, 5, 0)));
+            style.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0)));
             style.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
             style.Setters.Add(new Setter(FrameworkElement.CursorProperty, System.Windows.Input.Cursors.Hand));
             style.Setters.Add(new Setter(Control.TemplateProperty, template));
