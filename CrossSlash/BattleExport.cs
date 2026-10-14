@@ -60,8 +60,7 @@ namespace CrossSlash {
                 ? ModelBatchDiscovery.FindMagicModels(source)
                 : ModelBatchDiscovery.FindBattleModels(source);
             _battlefieldCodes = magicModels ? new List<string>() : ModelBatchDiscovery.FindBattleLocations(source);
-            _txtModelSearch = DesktopUi.CreateTextBox();
-            _txtModelSearch.ToolTip = "Search available models";
+            _txtModelSearch = DesktopUi.CreateSearchTextBox("Search available models");
             _modelView = CollectionViewSource.GetDefaultView(_modelCodes);
             _modelView.Filter = item => item is string code &&
                 (string.IsNullOrWhiteSpace(_txtModelSearch.Text) || code.Contains(_txtModelSearch.Text, StringComparison.OrdinalIgnoreCase));
@@ -99,7 +98,6 @@ namespace CrossSlash {
             _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 20, 10) };
 
             var content = new StackPanel();
-            content.Children.Add(DesktopUi.CreateSectionTitle("Export settings"));
             content.Children.Add(DesktopUi.CreateFormRow("Scale", _txtScale));
             content.Children.Add(new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 12),
@@ -172,7 +170,9 @@ namespace CrossSlash {
 
         private UIElement CreateModelPicker() {
             var picker = new StackPanel();
-            picker.Children.Add(DesktopUi.CreateFormRow("Search", _txtModelSearch, 80));
+            var searchRow = DesktopUi.CreateFormRow("Search", _txtModelSearch, 80);
+            searchRow.Margin = new Thickness(0, 0, 0, 6);
+            picker.Children.Add(searchRow);
             picker.Children.Add(_lstModels);
             return picker;
         }

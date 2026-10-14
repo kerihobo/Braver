@@ -106,6 +106,18 @@ namespace CrossSlash {
             FontSize = 14,
         };
 
+        public static TextBox CreateSearchTextBox(string toolTip) => new() {
+            ToolTip = toolTip,
+            Height = 30,
+            Padding = new Thickness(8, 3, 8, 3),
+            BorderBrush = ControlBorder,
+            BorderThickness = new Thickness(1),
+            Background = Brushes.White,
+            Foreground = TextPrimary,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            FontSize = 13,
+        };
+
         public static TextBlock CreateSectionTitle(string text) => new() {
             Text = text,
             FontSize = 17,
