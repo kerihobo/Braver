@@ -47,6 +47,8 @@ namespace CrossSlash {
         private DataSource _source;
         private bool _magicModels;
         private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
+        private readonly WrapPanel _exportOptions;
+        private StackPanel? _optionsPanel;
         private readonly TextBox _txtModelSearch, _txtScale, _txtBattlefield;
         private readonly ListBox _lstModels, _lstBattlefields;
         private readonly List<string> _modelCodes;
@@ -71,7 +73,7 @@ namespace CrossSlash {
                 ItemsSource = _modelView,
                 MinHeight = 150,
                 MaxHeight = 230,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
+                BorderBrush = DesktopUi.ControlBorderBrush,
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
             };
@@ -81,7 +83,7 @@ namespace CrossSlash {
                 ItemsSource = _battlefieldCodes,
                 MinHeight = 150,
                 MaxHeight = 230,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
+                BorderBrush = DesktopUi.ControlBorderBrush,
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
             };
@@ -93,24 +95,30 @@ namespace CrossSlash {
                 _lstBattlefields.SelectedIndex = 0;
                 _txtBattlefield.Text = _battlefieldCodes[0];
             }
-            _chkSRGB = new CheckBox { Content = "Convert colours from SRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 20, 10) };
-            _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 20, 10) };
-            _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 20, 10) };
+            _chkSRGB = new CheckBox { Content = "Convert colours from sRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 18, 8) };
+            _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 18, 8) };
+            _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 18, 8) };
+            _exportOptions = new WrapPanel {
+                Margin = new Thickness(0, 4, 0, 16),
+                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
+            };
 
             var content = new StackPanel();
             content.Children.Add(DesktopUi.CreateFormRow("Scale", _txtScale));
-            content.Children.Add(new WrapPanel {
-                Margin = new Thickness(0, 4, 0, 12),
-                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
-            });
 
             if (_magicModels)
-                content.Children.Add(CreateMagicModelContent());
+            {
+                var magicContent = CreateMagicModelContent();
+                MoveExportOptionsTo(magicContent);
+                content.Children.Add(magicContent);
+            }
             else {
                 var tabs = new TabControl { MinHeight = 430 };
                 tabs.Items.Add(new TabItem { Header = "Battle Models", Content = CreateBattleModelContent() });
                 tabs.Items.Add(new TabItem { Header = "Battlefields", Content = CreateBattlefieldContent() });
+                tabs.SelectionChanged += (_, _) => MoveExportOptionsToSelectedTab(tabs);
                 content.Children.Add(tabs);
+                MoveExportOptionsToSelectedTab(tabs);
             }
 
             DesktopUi.ConfigureWindow(
@@ -152,7 +160,7 @@ namespace CrossSlash {
             return panel;
         }
 
-        private UIElement CreateMagicModelContent() {
+        private StackPanel CreateMagicModelContent() {
             var panel = new StackPanel();
             panel.Children.Add(DesktopUi.CreateSectionTitle("Summon models"));
             panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} summons detected. Search the list and select a model to export."));
@@ -166,6 +174,20 @@ namespace CrossSlash {
             exportAnimations.Click += (_, _) => BtnExportAllAnimations_Clicked();
             panel.Children.Add(DesktopUi.CreateActionRow(export, exportAll, exportAnimations));
             return panel;
+        }
+
+        private void MoveExportOptionsToSelectedTab(TabControl tabs) {
+            if (tabs.SelectedItem is TabItem { Content: StackPanel panel })
+                MoveExportOptionsTo(panel);
+        }
+
+        private void MoveExportOptionsTo(StackPanel panel) {
+            if (ReferenceEquals(_optionsPanel, panel))
+                return;
+            if (_optionsPanel != null)
+                _optionsPanel.Children.Remove(_exportOptions);
+            panel.Children.Insert(Math.Max(0, panel.Children.Count - 1), _exportOptions);
+            _optionsPanel = panel;
         }
 
         private UIElement CreateModelPicker() {

@@ -72,7 +72,7 @@ namespace CrossSlash {
                 ItemsSource = _hrcView,
                 MinHeight = 140,
                 MaxHeight = 190,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
+                BorderBrush = DesktopUi.ControlBorderBrush,
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
             };
@@ -84,7 +84,7 @@ namespace CrossSlash {
                 SelectionMode = SelectionMode.Multiple,
                 MinHeight = 140,
                 MaxHeight = 190,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
+                BorderBrush = DesktopUi.ControlBorderBrush,
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
                 IsEnabled = false,

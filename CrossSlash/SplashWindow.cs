@@ -63,6 +63,10 @@ namespace CrossSlash {
                 Padding = new Thickness(8, 6, 8, 6),
                 Margin = new Thickness(0, 0, 10, 0),
                 VerticalContentAlignment = VerticalAlignment.Center,
+                Background = DesktopUi.InputBackgroundBrush,
+                Foreground = DesktopUi.TextPrimaryBrush,
+                BorderBrush = DesktopUi.ControlBorderBrush,
+                BorderThickness = new Thickness(1),
             };
             var sourcePath = DesktopUi.CreateTextBox(savedPath, readOnly: true);
             sourcePath.ToolTip = savedPath ?? "No source selected";
@@ -82,8 +86,8 @@ namespace CrossSlash {
             sourceRow.Children.Add(browse);
 
             var sourcePicker = new Border {
-                Background = new SolidColorBrush(Color.FromRgb(248, 250, 252)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(226, 232, 240)),
+                Background = DesktopUi.SurfaceBrush,
+                BorderBrush = DesktopUi.ControlBorderBrush,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(14),
@@ -121,7 +125,7 @@ namespace CrossSlash {
 
         private static UIElement CreateStatus(string text) => new TextBlock {
             Text = text,
-            Foreground = new SolidColorBrush(Color.FromRgb(100, 116, 139)),
+            Foreground = DesktopUi.TextSecondaryBrush,
             TextWrapping = TextWrapping.Wrap,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,

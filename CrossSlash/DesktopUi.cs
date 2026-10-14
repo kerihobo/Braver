@@ -14,12 +14,21 @@ namespace CrossSlash {
     internal static class DesktopUi {
         public static Window? MainWindow { get; set; }
 
-        private static readonly Brush PageBackground = Brush("#F3F6FA");
-        private static readonly Brush Accent = Brush("#2563EB");
-        private static readonly Brush AccentHover = Brush("#1D4ED8");
-        private static readonly Brush TextPrimary = Brush("#172B4D");
-        private static readonly Brush TextSecondary = Brush("#64748B");
-        private static readonly Brush ControlBorder = Brush("#DCE3ED");
+        private static readonly Brush PageBackground = Brush("#202A35");
+        private static readonly Brush Surface = Brush("#293643");
+        private static readonly Brush SurfaceRaised = Brush("#344352");
+        private static readonly Brush InputBackground = Brush("#222D38");
+        private static readonly Brush Accent = Brush("#3478C4");
+        private static readonly Brush AccentHover = Brush("#2D6DAF");
+        private static readonly Brush TextPrimary = Brush("#E7EDF3");
+        private static readonly Brush TextSecondary = Brush("#B3C0CC");
+        private static readonly Brush ControlBorder = Brush("#506171");
+
+        public static Brush SurfaceBrush => Surface;
+        public static Brush InputBackgroundBrush => InputBackground;
+        public static Brush ControlBorderBrush => ControlBorder;
+        public static Brush TextPrimaryBrush => TextPrimary;
+        public static Brush TextSecondaryBrush => TextSecondary;
 
         private static Brush Brush(string color) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)!);
 
@@ -36,8 +45,10 @@ namespace CrossSlash {
             window.MinHeight = Math.Min(height, 560);
             window.WindowStartupLocation = WindowStartupLocation.CenterOwner;
             window.Background = PageBackground;
+            window.Foreground = TextPrimary;
             window.FontFamily = new FontFamily("Segoe UI");
             window.FontSize = 14;
+            ApplyThemeResources(window);
 
             UIElement body = scrollContent
                 ? new ScrollViewer {
@@ -50,8 +61,180 @@ namespace CrossSlash {
             window.Content = body;
         }
 
+        private static void ApplyThemeResources(Window window) {
+            window.Resources[SystemColors.WindowBrushKey] = Surface;
+            window.Resources[SystemColors.WindowTextBrushKey] = TextPrimary;
+            window.Resources[SystemColors.ControlBrushKey] = SurfaceRaised;
+            window.Resources[SystemColors.ControlLightBrushKey] = SurfaceRaised;
+            window.Resources[SystemColors.ControlTextBrushKey] = TextPrimary;
+            window.Resources[SystemColors.HighlightBrushKey] = Accent;
+            window.Resources[SystemColors.HighlightTextBrushKey] = Brushes.White;
+            window.Resources[SystemColors.GrayTextBrushKey] = TextSecondary;
+            window.Resources[SystemColors.MenuBrushKey] = Surface;
+            window.Resources[SystemColors.MenuTextBrushKey] = TextPrimary;
+            window.Resources[typeof(CheckBox)] = CreateCheckBoxStyle();
+            window.Resources[typeof(ListBox)] = CreateListBoxStyle();
+            window.Resources[typeof(ListBoxItem)] = CreateListBoxItemStyle();
+            window.Resources[typeof(ComboBox)] = CreateComboBoxStyle();
+            window.Resources[typeof(ComboBoxItem)] = CreateComboBoxItemStyle();
+            window.Resources[typeof(TabControl)] = CreateTabControlStyle();
+            window.Resources[typeof(TabItem)] = CreateTabItemStyle();
+        }
+
+        private static Style CreateCheckBoxStyle() {
+            var checkBorder = new FrameworkElementFactory(typeof(Border), "checkBorder");
+            checkBorder.SetValue(FrameworkElement.WidthProperty, 16d);
+            checkBorder.SetValue(FrameworkElement.HeightProperty, 16d);
+            checkBorder.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            checkBorder.SetValue(Border.BackgroundProperty, InputBackground);
+            checkBorder.SetValue(Border.BorderBrushProperty, ControlBorder);
+            checkBorder.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+            checkBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(3));
+
+            var mark = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path), "checkMark");
+            mark.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse("M 2,8 L 6,12 L 14,3"));
+            mark.SetValue(System.Windows.Shapes.Path.StrokeProperty, Brushes.White);
+            mark.SetValue(System.Windows.Shapes.Path.StrokeThicknessProperty, 2d);
+            mark.SetValue(System.Windows.Shapes.Path.StrokeStartLineCapProperty, PenLineCap.Round);
+            mark.SetValue(System.Windows.Shapes.Path.StrokeEndLineCapProperty, PenLineCap.Round);
+            mark.SetValue(FrameworkElement.WidthProperty, 16d);
+            mark.SetValue(FrameworkElement.HeightProperty, 16d);
+            mark.SetValue(UIElement.VisibilityProperty, Visibility.Collapsed);
+            checkBorder.AppendChild(mark);
+
+            var root = new FrameworkElementFactory(typeof(StackPanel));
+            root.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+            root.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            root.AppendChild(checkBorder);
+
+            var content = new FrameworkElementFactory(typeof(ContentPresenter));
+            content.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 0, 0, 0));
+            content.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            content.SetValue(ContentPresenter.RecognizesAccessKeyProperty, true);
+            content.SetBinding(ContentPresenter.ContentProperty, new Binding(nameof(ContentControl.Content)) { RelativeSource = RelativeSource.TemplatedParent });
+            content.SetBinding(ContentPresenter.ContentTemplateProperty, new Binding(nameof(ContentControl.ContentTemplate)) { RelativeSource = RelativeSource.TemplatedParent });
+            root.AppendChild(content);
+
+            var template = new ControlTemplate(typeof(CheckBox)) { VisualTree = root };
+            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            hover.Setters.Add(new Setter(Border.BorderBrushProperty, Accent, "checkBorder"));
+            template.Triggers.Add(hover);
+            var checkedTrigger = new Trigger { Property = ToggleButton.IsCheckedProperty, Value = true };
+            checkedTrigger.Setters.Add(new Setter(Border.BackgroundProperty, Accent, "checkBorder"));
+            checkedTrigger.Setters.Add(new Setter(Border.BorderBrushProperty, Accent, "checkBorder"));
+            checkedTrigger.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Visible, "checkMark"));
+            template.Triggers.Add(checkedTrigger);
+            var disabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+            disabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.55));
+            template.Triggers.Add(disabled);
+
+            var style = new Style(typeof(CheckBox));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
+            style.Setters.Add(new Setter(Control.TemplateProperty, template));
+            style.Setters.Add(new Setter(FrameworkElement.CursorProperty, System.Windows.Input.Cursors.Hand));
+            return style;
+        }
+
+        private static Style CreateListBoxStyle() {
+            var style = new Style(typeof(ListBox));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, InputBackground));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+            return style;
+        }
+
+        private static Style CreateListBoxItemStyle() {
+            var style = new Style(typeof(ListBoxItem));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.Transparent));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(6, 3, 6, 3)));
+            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            hover.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceRaised));
+            style.Triggers.Add(hover);
+            var selected = new Trigger { Property = ListBoxItem.IsSelectedProperty, Value = true };
+            selected.Setters.Add(new Setter(Control.BackgroundProperty, Accent));
+            selected.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+            style.Triggers.Add(selected);
+            return style;
+        }
+
+        private static Style CreateComboBoxStyle() {
+            var style = new Style(typeof(ComboBox));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, InputBackground));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 6, 8, 6)));
+            style.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+            return style;
+        }
+
+        private static Style CreateComboBoxItemStyle() {
+            var style = new Style(typeof(ComboBoxItem));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, Surface));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 6, 8, 6)));
+            var highlighted = new Trigger { Property = ComboBoxItem.IsHighlightedProperty, Value = true };
+            highlighted.Setters.Add(new Setter(Control.BackgroundProperty, Accent));
+            highlighted.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+            style.Triggers.Add(highlighted);
+            return style;
+        }
+
+        private static Style CreateTabControlStyle() {
+            var style = new Style(typeof(TabControl));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
+            return style;
+        }
+
+        private static Style CreateTabItemStyle() {
+            var border = new FrameworkElementFactory(typeof(Border), "tabBorder");
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(7, 7, 0, 0));
+            border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Control.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetBinding(Border.BorderThicknessProperty, new Binding(nameof(Control.BorderThickness)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetBinding(Border.PaddingProperty, new Binding(nameof(Control.Padding)) { RelativeSource = RelativeSource.TemplatedParent });
+            var header = new FrameworkElementFactory(typeof(ContentPresenter));
+            header.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            header.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            header.SetBinding(ContentPresenter.ContentProperty, new Binding(nameof(HeaderedContentControl.Header)) { RelativeSource = RelativeSource.TemplatedParent });
+            header.SetBinding(ContentPresenter.ContentTemplateProperty, new Binding(nameof(HeaderedContentControl.HeaderTemplate)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.AppendChild(header);
+
+            var template = new ControlTemplate(typeof(TabItem)) { VisualTree = border };
+            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            hover.Setters.Add(new Setter(Border.BackgroundProperty, SurfaceRaised, "tabBorder"));
+            template.Triggers.Add(hover);
+            var selected = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
+            selected.Setters.Add(new Setter(Control.BackgroundProperty, Surface));
+            selected.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
+            selected.Setters.Add(new Setter(Control.BorderBrushProperty, Accent));
+            template.Triggers.Add(selected);
+
+            var style = new Style(typeof(TabItem));
+            style.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceRaised));
+            style.Setters.Add(new Setter(Control.ForegroundProperty, TextSecondary));
+            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+            style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(14, 8, 14, 8)));
+            style.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0, 0, 5, 0)));
+            style.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
+            style.Setters.Add(new Setter(FrameworkElement.CursorProperty, System.Windows.Input.Cursors.Hand));
+            style.Setters.Add(new Setter(Control.TemplateProperty, template));
+            var selectedStyle = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
+            selectedStyle.Setters.Add(new Setter(Control.BackgroundProperty, Surface));
+            selectedStyle.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
+            selectedStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Accent));
+            style.Triggers.Add(selectedStyle);
+            return style;
+        }
+
         public static Border CreateCard(UIElement content) => new() {
-            Background = Brushes.White,
+            Background = Surface,
             BorderBrush = ControlBorder,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(14),
@@ -66,7 +249,7 @@ namespace CrossSlash {
                 Margin = new Thickness(0, 0, 10, 0),
                 FontWeight = FontWeights.SemiBold,
                 Cursor = System.Windows.Input.Cursors.Hand,
-                Background = primary ? Accent : Brushes.White,
+                Background = primary ? Accent : SurfaceRaised,
                 Foreground = primary ? Brushes.White : TextPrimary,
                 BorderBrush = primary ? Accent : ControlBorder,
                 BorderThickness = new Thickness(1),
@@ -88,7 +271,7 @@ namespace CrossSlash {
 
             var template = new ControlTemplate(typeof(Button)) { VisualTree = border };
             var hover = new Trigger { Property = Button.IsMouseOverProperty, Value = true };
-            hover.Setters.Add(new Setter(Border.BackgroundProperty, primary ? AccentHover : Brush("#F3F6FA"), "buttonBorder"));
+            hover.Setters.Add(new Setter(Border.BackgroundProperty, primary ? AccentHover : Brush("#415263"), "buttonBorder"));
             template.Triggers.Add(hover);
             button.Template = template;
             return button;
@@ -100,7 +283,7 @@ namespace CrossSlash {
             Padding = new Thickness(10, 8, 10, 8),
             BorderBrush = ControlBorder,
             BorderThickness = new Thickness(1),
-            Background = readOnly ? Brush("#F8FAFC") : Brushes.White,
+            Background = readOnly ? Surface : InputBackground,
             Foreground = TextPrimary,
             VerticalContentAlignment = VerticalAlignment.Center,
             FontSize = 14,
@@ -112,7 +295,7 @@ namespace CrossSlash {
             Padding = new Thickness(8, 3, 8, 3),
             BorderBrush = ControlBorder,
             BorderThickness = new Thickness(1),
-            Background = Brushes.White,
+            Background = InputBackground,
             Foreground = TextPrimary,
             VerticalContentAlignment = VerticalAlignment.Center,
             FontSize = 13,

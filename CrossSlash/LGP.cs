@@ -69,7 +69,7 @@ namespace CrossSlash {
                 ItemsSource = _entries,
                 SelectionMode = SelectionMode.Extended,
                 MinHeight = 300,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
+                BorderBrush = DesktopUi.ControlBorderBrush,
                 BorderThickness = new Thickness(1),
             };
             _destination = DesktopUi.CreateTextBox(readOnly: true);
