@@ -401,7 +401,9 @@ namespace CrossSlash {
             border.AppendChild(header);
 
             var template = new ControlTemplate(typeof(TabItem)) { VisualTree = border };
-            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+            var hover = new MultiTrigger();
+            hover.Conditions.Add(new Condition(UIElement.IsMouseOverProperty, true));
+            hover.Conditions.Add(new Condition(TabItem.IsSelectedProperty, false));
             hover.Setters.Add(new Setter(Border.BackgroundProperty, SurfaceRaised, "tabBorder"));
             template.Triggers.Add(hover);
             var selected = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
