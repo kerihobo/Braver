@@ -46,7 +46,7 @@ namespace CrossSlash {
     public class BattleExportWindow : Window {
         private DataSource _source;
         private bool _magicModels;
-        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours;
+        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations;
         private readonly WrapPanel _exportOptions;
         private StackPanel? _optionsPanel;
         private readonly TextBox _txtModelSearch, _txtScale, _txtBattlefield;
@@ -101,9 +101,10 @@ namespace CrossSlash {
             _chkSRGB = new CheckBox { Content = "Convert colours from sRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 18, 8) };
             _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 18, 8) };
             _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 18, 8) };
+            _chkEmbedAnimations = new CheckBox { Content = "Embed animations", IsChecked = true, Margin = new Thickness(0, 0, 18, 8) };
             _exportOptions = new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 16),
-                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
+                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations },
             };
 
             var content = new StackPanel();
@@ -222,8 +223,12 @@ namespace CrossSlash {
         private sealed record MagicModelTabState(string Group, List<string> ModelCodes, ListBox ModelList, StackPanel Panel);
 
         private void MoveExportOptionsToSelectedTab(TabControl tabs) {
-            if (tabs.SelectedItem is TabItem { Content: StackPanel panel })
+            if (tabs.SelectedItem is TabItem { Content: StackPanel panel } tab) {
+                _chkEmbedAnimations.Visibility = Equals(tab.Header, "Battlefields")
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
                 MoveExportOptionsTo(panel);
+            }
         }
 
         private void MoveExportOptionsTo(StackPanel panel) {
@@ -258,9 +263,13 @@ namespace CrossSlash {
 
                 var options = GetOptions(scale);
                 var exporter = new BattleModel(_source, options);
-                exporter.BuildSceneAuto(modelCode).SaveGLB(outputFile);
+                var model = exporter.BuildSceneAuto(modelCode, includeAnimations: _chkEmbedAnimations.IsChecked == true);
+                model.SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
-                DesktopUi.ShowInfo(this, "Success", "Export succeeded");
+                string animationSummary = _chkEmbedAnimations.IsChecked == true
+                    ? $"Animation clips included: {model.LogicalAnimations.Count}"
+                    : "Animations were not embedded.";
+                DesktopUi.ShowInfo(this, "Success", $"Export succeeded.\n{animationSummary}");
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Error", ex.Message);
             }
@@ -293,18 +302,24 @@ namespace CrossSlash {
                 PreferencesStore.RememberOutputDirectory(outputDirectory);
 
                 int exported = 0;
+                int animationCount = 0;
                 var failures = new List<string>();
                 foreach (string code in modelCodes) {
                     try {
                         var exporter = new BattleModel(_source, GetOptions(scale));
-                        exporter.BuildSceneAuto(code).SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
+                        var model = exporter.BuildSceneAuto(code, includeAnimations: _chkEmbedAnimations.IsChecked == true);
+                        model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
+                        animationCount += model.LogicalAnimations.Count;
                         exported++;
                     } catch (Exception ex) {
                         failures.Add($"{code}: {ex.Message}");
                     }
                 }
 
-                string result = $"Exported {exported} of {modelCodes.Count} models to:\n{outputDirectory}";
+                string animationSummary = _chkEmbedAnimations.IsChecked == true
+                    ? $"Animation clips included: {animationCount}"
+                    : "Animations were not embedded.";
+                string result = $"Exported {exported} of {modelCodes.Count} models to:\n{outputDirectory}\n\n{animationSummary}";
                 if (failures.Count > 0) {
                     result += $"\n\nFailed: {failures.Count}\n" + string.Join("\n", failures.Take(5));
                     if (failures.Count > 5)
