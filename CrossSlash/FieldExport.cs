@@ -140,8 +140,6 @@ namespace CrossSlash {
 
             DesktopUi.ConfigureWindow(
                 this,
-                "Field model exporter",
-                "Export models with selected animations, or batch export every compatible animation",
                 content,
                 width: 1120,
                 height: 820

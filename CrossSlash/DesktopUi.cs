@@ -15,7 +15,6 @@ namespace CrossSlash {
         public static Window? MainWindow { get; set; }
 
         private static readonly Brush PageBackground = Brush("#F3F6FA");
-        private static readonly Brush HeaderBackground = Brush("#172B4D");
         private static readonly Brush Accent = Brush("#2563EB");
         private static readonly Brush AccentHover = Brush("#1D4ED8");
         private static readonly Brush TextPrimary = Brush("#172B4D");
@@ -26,14 +25,11 @@ namespace CrossSlash {
 
         public static void ConfigureWindow(
             Window window,
-            string title,
-            string subtitle,
             UIElement content,
-            UIElement? headerAction = null,
             double width = 1040,
             double height = 760,
             bool scrollContent = true) {
-            window.Title = title;
+            window.Title = string.Empty;
             window.Width = width;
             window.Height = height;
             window.MinWidth = Math.Min(width, 760);
@@ -43,37 +39,6 @@ namespace CrossSlash {
             window.FontFamily = new FontFamily("Segoe UI");
             window.FontSize = 14;
 
-            var root = new Grid();
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-
-            var header = new Border {
-                Background = HeaderBackground,
-                Padding = new Thickness(24, 20, 24, 20),
-            };
-            var headerLayout = new DockPanel { LastChildFill = true };
-            if (headerAction != null) {
-                DockPanel.SetDock(headerAction, Dock.Right);
-                headerLayout.Children.Add(headerAction);
-            }
-
-            var heading = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            heading.Children.Add(new TextBlock {
-                Text = title,
-                FontSize = 26,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = Brushes.White,
-            });
-            heading.Children.Add(new TextBlock {
-                Text = subtitle,
-                FontSize = 13,
-                Foreground = Brush("#C5D1E2"),
-                Margin = new Thickness(0, 4, 0, 0),
-            });
-            headerLayout.Children.Add(heading);
-            header.Child = headerLayout;
-            root.Children.Add(header);
-
             UIElement body = scrollContent
                 ? new ScrollViewer {
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -81,10 +46,8 @@ namespace CrossSlash {
                     Padding = new Thickness(24),
                     Content = CreateCard(content),
                 }
-                : CreateCard(content);
-            Grid.SetRow(body, 1);
-            root.Children.Add(body);
-            window.Content = root;
+                : content;
+            window.Content = body;
         }
 
         public static Border CreateCard(UIElement content) => new() {

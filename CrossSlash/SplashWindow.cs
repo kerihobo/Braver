@@ -40,8 +40,6 @@ namespace CrossSlash {
 
             DesktopUi.ConfigureWindow(
                 this,
-                "CrossSlash",
-                "Choose an exporter tab. Each tab remembers its own source.",
                 _tabs,
                 width: 1120,
                 height: 820,

@@ -92,7 +92,7 @@ namespace CrossSlash {
             content.Children.Add(destinationRow);
             content.Children.Add(DesktopUi.CreateActionRow(export));
 
-            DesktopUi.ConfigureWindow(this, "Texture exporter", "Save selected LGP textures as PNG files", content);
+            DesktopUi.ConfigureWindow(this, content);
         }
 
         private void BrowseDestination() {
