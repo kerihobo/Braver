@@ -79,8 +79,8 @@ namespace CrossSlash {
             _lstAnimations = new ListBox {
                 ItemsSource = Array.Empty<string>(),
                 SelectionMode = SelectionMode.Multiple,
-                MinHeight = 140,
-                MaxHeight = 230,
+                MinHeight = 220,
+                MaxHeight = 340,
                 BorderBrush = new SolidColorBrush(Color.FromRgb(220, 227, 237)),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
@@ -105,11 +105,26 @@ namespace CrossSlash {
 
             var content = new StackPanel();
             content.Children.Add(DesktopUi.CreateSectionTitle("Field model"));
-            content.Children.Add(DesktopUi.CreateHint($"Choose a model from the source. {_hrcFiles.Count} HRC models found."));
-            content.Children.Add(DesktopUi.CreateFormRow("Model", CreateModelPicker(), 110));
-            content.Children.Add(_chkAllCompatible);
-            content.Children.Add(DesktopUi.CreateFormRow("Compatible animations", _lstAnimations, 110));
-            content.Children.Add(_animationHint);
+
+            var pickerColumns = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
+            modelColumn.Children.Add(DesktopUi.CreateSectionTitle("Models"));
+            modelColumn.Children.Add(DesktopUi.CreateHint($"{_hrcFiles.Count:N0} HRC models found."));
+            modelColumn.Children.Add(CreateModelPicker());
+            pickerColumns.Children.Add(modelColumn);
+
+            var animationColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            animationColumn.Children.Add(DesktopUi.CreateSectionTitle("Compatible animations"));
+            animationColumn.Children.Add(_chkAllCompatible);
+            animationColumn.Children.Add(_animationHint);
+            animationColumn.Children.Add(_lstAnimations);
+            Grid.SetColumn(animationColumn, 1);
+            pickerColumns.Children.Add(animationColumn);
+
+            content.Children.Add(pickerColumns);
             content.Children.Add(new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 16),
                 Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
