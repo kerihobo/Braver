@@ -118,6 +118,30 @@ namespace CrossSlash {
             FontSize = 13,
         };
 
+        public static UIElement CreateSearchField(string placeholderText, TextBox textBox) {
+            var placeholder = new TextBlock {
+                Text = placeholderText,
+                Foreground = TextSecondary,
+                Margin = new Thickness(textBox.Padding.Left + textBox.BorderThickness.Left, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                IsHitTestVisible = false,
+            };
+            var placeholderStyle = new Style(typeof(TextBlock));
+            placeholderStyle.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Collapsed));
+            var emptyText = new DataTrigger {
+                Binding = new Binding(nameof(TextBox.Text)) { Source = textBox },
+                Value = string.Empty,
+            };
+            emptyText.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Visible));
+            placeholderStyle.Triggers.Add(emptyText);
+            placeholder.Style = placeholderStyle;
+
+            var field = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            field.Children.Add(textBox);
+            field.Children.Add(placeholder);
+            return field;
+        }
+
         public static TextBlock CreateSectionTitle(string text) => new() {
             Text = text,
             FontSize = 17,

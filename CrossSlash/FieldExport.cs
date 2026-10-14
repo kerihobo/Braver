@@ -302,17 +302,13 @@ namespace CrossSlash {
 
         private UIElement CreateModelPicker() {
             var picker = new StackPanel();
-            var searchRow = DesktopUi.CreateFormRow("Search", _txtModelSearch, 80);
-            searchRow.Margin = new Thickness(0, 0, 0, 6);
-            picker.Children.Add(searchRow);
+            picker.Children.Add(DesktopUi.CreateSearchField("Search models…", _txtModelSearch));
             picker.Children.Add(_lvHRCs);
             return picker;
         }
 
         private UIElement CreateAnimationSearch() {
-            var searchRow = DesktopUi.CreateFormRow("Search", _txtAnimationSearch, 80);
-            searchRow.Margin = new Thickness(0, 0, 0, 4);
-            return searchRow;
+            return DesktopUi.CreateSearchField("Search animations…", _txtAnimationSearch);
         }
 
         private void RefreshCompatibleAnimations() {

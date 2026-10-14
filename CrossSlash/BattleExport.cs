@@ -170,9 +170,7 @@ namespace CrossSlash {
 
         private UIElement CreateModelPicker() {
             var picker = new StackPanel();
-            var searchRow = DesktopUi.CreateFormRow("Search", _txtModelSearch, 80);
-            searchRow.Margin = new Thickness(0, 0, 0, 6);
-            picker.Children.Add(searchRow);
+            picker.Children.Add(DesktopUi.CreateSearchField("Search models…", _txtModelSearch));
             picker.Children.Add(_lstModels);
             return picker;
         }
