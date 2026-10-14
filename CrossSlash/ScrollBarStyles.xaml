@@ -7,14 +7,10 @@
       <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#718596" />
       <SolidColorBrush x:Key="ScrollButtonBrush" Color="#293643" />
       <SolidColorBrush x:Key="ScrollButtonHoverBrush" Color="#415263" />
-      <SolidColorBrush x:Key="ScrollButtonBorderBrush" Color="#506171" />
-
       <ControlTemplate x:Key="ScrollArrowButtonTemplate" TargetType="{x:Type RepeatButton}">
         <Border x:Name="ArrowBorder"
                 Background="{TemplateBinding Background}"
-                BorderBrush="{TemplateBinding BorderBrush}"
-                BorderThickness="{TemplateBinding BorderThickness}"
-                CornerRadius="3">
+                BorderThickness="0">
           <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Border>
         <ControlTemplate.Triggers>
@@ -23,7 +19,6 @@
           </Trigger>
           <Trigger Property="IsPressed" Value="True">
             <Setter TargetName="ArrowBorder" Property="Background" Value="#3478C4" />
-            <Setter TargetName="ArrowBorder" Property="BorderBrush" Value="#3478C4" />
           </Trigger>
           <Trigger Property="IsEnabled" Value="False">
             <Setter TargetName="ArrowBorder" Property="Opacity" Value="0.45" />
@@ -32,13 +27,11 @@
       </ControlTemplate>
 
       <Style x:Key="ScrollArrowButtonStyle" TargetType="{x:Type RepeatButton}">
-        <Setter Property="Height" Value="14" />
         <Setter Property="Background" Value="{StaticResource ScrollButtonBrush}" />
         <Setter Property="Foreground" Value="#D5DEE6" />
-        <Setter Property="BorderBrush" Value="{StaticResource ScrollButtonBorderBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="0" />
-        <Setter Property="Margin" Value="1" />
+        <Setter Property="Margin" Value="0" />
         <Setter Property="Focusable" Value="False" />
         <Setter Property="Template" Value="{StaticResource ScrollArrowButtonTemplate}" />
       </Style>
@@ -57,9 +50,7 @@
         <Border x:Name="ThumbBorder"
                 Margin="2,1"
                 Background="{TemplateBinding Background}"
-                BorderBrush="{TemplateBinding BorderBrush}"
-                BorderThickness="{TemplateBinding BorderThickness}"
-                CornerRadius="5" />
+                BorderThickness="0" />
         <ControlTemplate.Triggers>
           <Trigger Property="IsMouseOver" Value="True">
             <Setter TargetName="ThumbBorder" Property="Background" Value="{StaticResource ScrollThumbHoverBrush}" />
@@ -74,8 +65,7 @@
       </ControlTemplate>
       <Style x:Key="ScrollThumbStyle" TargetType="{x:Type Thumb}">
         <Setter Property="Background" Value="{StaticResource ScrollThumbBrush}" />
-        <Setter Property="BorderBrush" Value="{StaticResource ScrollTrackBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Template" Value="{StaticResource ScrollThumbTemplate}" />
       </Style>
 
