@@ -143,11 +143,36 @@ namespace CrossSlash {
         }
 
         private static Style CreateListBoxStyle() {
+            var border = new FrameworkElementFactory(typeof(Border), "ListBoxBorder");
+            border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Control.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetBinding(Border.BorderThicknessProperty, new Binding(nameof(Control.BorderThickness)) { RelativeSource = RelativeSource.TemplatedParent });
+            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
+            border.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
+
+            var scrollViewer = new FrameworkElementFactory(typeof(ScrollViewer), "PART_ScrollViewer");
+            scrollViewer.SetBinding(Control.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
+            scrollViewer.SetBinding(ScrollViewer.PaddingProperty, new Binding(nameof(Control.Padding)) { RelativeSource = RelativeSource.TemplatedParent });
+            scrollViewer.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty, ScrollBarVisibility.Auto);
+            scrollViewer.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty, ScrollBarVisibility.Disabled);
+            scrollViewer.SetValue(ScrollViewer.CanContentScrollProperty, true);
+            scrollViewer.SetValue(UIElement.FocusableProperty, false);
+            var items = new FrameworkElementFactory(typeof(ItemsPresenter), "ItemsPresenter");
+            items.SetValue(KeyboardNavigation.DirectionalNavigationProperty, KeyboardNavigationMode.Contained);
+            scrollViewer.AppendChild(items);
+            border.AppendChild(scrollViewer);
+
+            var template = new ControlTemplate(typeof(ListBox)) { VisualTree = border };
+            template.Resources[typeof(ScrollBar)] = CreateScrollBarStyle();
+            template.Resources[typeof(Thumb)] = CreateScrollThumbStyle();
+
             var style = new Style(typeof(ListBox));
             style.Setters.Add(new Setter(Control.BackgroundProperty, InputBackground));
             style.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
             style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
             style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+            style.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+            style.Setters.Add(new Setter(Control.TemplateProperty, template));
             return style;
         }
 
@@ -338,8 +363,7 @@ namespace CrossSlash {
             strip.SetValue(UIElement.SnapsToDevicePixelsProperty, true);
             strip.SetValue(UIElement.ClipToBoundsProperty, false);
             strip.SetValue(Border.BackgroundProperty, TabStripBackground);
-            strip.SetValue(Border.BorderBrushProperty, ControlBorder);
-            strip.SetValue(Border.BorderThicknessProperty, new Thickness(0, 0, 0, 1));
+            strip.SetValue(Border.BorderThicknessProperty, new Thickness(0));
             var tabPanel = new FrameworkElementFactory(typeof(TabPanel), "HeaderPanel");
             tabPanel.SetValue(Panel.IsItemsHostProperty, true);
             tabPanel.SetValue(Panel.ZIndexProperty, 1);
@@ -381,25 +405,22 @@ namespace CrossSlash {
             hover.Setters.Add(new Setter(Border.BackgroundProperty, SurfaceRaised, "tabBorder"));
             template.Triggers.Add(hover);
             var selected = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
-            selected.Setters.Add(new Setter(Control.BackgroundProperty, Surface));
+            selected.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
             selected.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
-            selected.Setters.Add(new Setter(Control.BorderBrushProperty, Accent));
             template.Triggers.Add(selected);
 
             var style = new Style(typeof(TabItem));
             style.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
             style.Setters.Add(new Setter(Control.ForegroundProperty, TextSecondary));
-            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
-            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
+            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
             style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(14, 8, 14, 8)));
             style.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0)));
             style.Setters.Add(new Setter(Control.FontWeightProperty, FontWeights.SemiBold));
             style.Setters.Add(new Setter(FrameworkElement.CursorProperty, System.Windows.Input.Cursors.Hand));
             style.Setters.Add(new Setter(Control.TemplateProperty, template));
             var selectedStyle = new Trigger { Property = TabItem.IsSelectedProperty, Value = true };
-            selectedStyle.Setters.Add(new Setter(Control.BackgroundProperty, Surface));
+            selectedStyle.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
             selectedStyle.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
-            selectedStyle.Setters.Add(new Setter(Control.BorderBrushProperty, Accent));
             style.Triggers.Add(selectedStyle);
             return style;
         }
