@@ -49,7 +49,7 @@ namespace CrossSlash {
         private readonly CheckBox _chkSRGB;
         private readonly CheckBox _chkSwapWinding;
         private readonly CheckBox _chkBakeColours;
-        private readonly TextBlock _animationHint;
+        private readonly TextBlock _modelTitle, _animationTitle;
         private readonly DataSource _source;
 
         public FieldExportWindow(DataSource source) {
@@ -89,7 +89,8 @@ namespace CrossSlash {
                 Padding = new Thickness(4),
                 IsEnabled = false,
             };
-            _animationHint = DesktopUi.CreateHint("Compatible animations for the selected model will appear here.");
+            _modelTitle = DesktopUi.CreateSectionTitle($"Models ({_hrcFiles.Count:N0})");
+            _animationTitle = DesktopUi.CreateSectionTitle("Compatible animations (0)");
 
             _chkAllCompatible = new CheckBox {
                 Content = "Use all compatible animations",
@@ -131,16 +132,14 @@ namespace CrossSlash {
             pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
-            modelColumn.Children.Add(DesktopUi.CreateSectionTitle("Models"));
-            modelColumn.Children.Add(DesktopUi.CreateHint($"{_hrcFiles.Count:N0} HRC models found."));
+            modelColumn.Children.Add(_modelTitle);
             modelColumn.Children.Add(CreateModelPicker());
             pickerColumns.Children.Add(modelColumn);
 
             var animationColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-            animationColumn.Children.Add(DesktopUi.CreateSectionTitle("Compatible animations"));
+            animationColumn.Children.Add(_animationTitle);
             animationColumn.Children.Add(CreateAnimationSearch());
             animationColumn.Children.Add(_chkAllCompatible);
-            animationColumn.Children.Add(_animationHint);
             animationColumn.Children.Add(_lstAnimations);
             Grid.SetColumn(animationColumn, 1);
             pickerColumns.Children.Add(animationColumn);
@@ -315,7 +314,9 @@ namespace CrossSlash {
             if (_lvHRCs.SelectedItem is not string hrcFile) {
                 _compatibleAnimationFiles = new List<string>();
                 RefreshAnimationList();
-                _animationHint.Text = "Select a field model to find its compatible animations.";
+                _animationTitle.Text = "Compatible animations (0)";
+                _animationTitle.ToolTip = "Select a field model to see compatible animations.";
+                _chkAllCompatible.Content = "Use all compatible animations";
                 return;
             }
 
@@ -323,14 +324,15 @@ namespace CrossSlash {
                 var exporter = new FieldModel(_source, GetOptions());
                 _compatibleAnimationFiles = exporter.FindCompatibleAnimations(hrcFile, _animationFiles).ToList();
                 RefreshAnimationList();
-                _animationHint.Text = _compatibleAnimationFiles.Count == 0
-                    ? "No compatible animations were found for this model."
-                    : $"{_compatibleAnimationFiles.Count:N0} compatible animations found for {hrcFile}.";
-                _chkAllCompatible.Content = $"Use all compatible animations ({_compatibleAnimationFiles.Count:N0})";
+                _animationTitle.Text = $"Compatible animations ({_compatibleAnimationFiles.Count:N0})";
+                _animationTitle.ToolTip = _compatibleAnimationFiles.Count == 0
+                    ? $"No compatible animations were found for {hrcFile}."
+                    : $"Compatible animations for {hrcFile}.";
             } catch (Exception ex) {
                 _compatibleAnimationFiles = new List<string>();
                 RefreshAnimationList();
-                _animationHint.Text = $"Could not check animation compatibility: {ex.Message}";
+                _animationTitle.Text = "Compatible animations (0)";
+                _animationTitle.ToolTip = $"Could not check animation compatibility: {ex.Message}";
                 _chkAllCompatible.Content = "Use all compatible animations";
             }
         }
