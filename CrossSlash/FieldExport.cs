@@ -95,7 +95,9 @@ namespace CrossSlash {
             _chkAllCompatible = new CheckBox {
                 Content = "Use all compatible animations",
                 IsChecked = true,
-                Margin = new Thickness(0, 4, 0, 12),
+                Margin = new Thickness(0, 0, 0, 12),
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right,
             };
             _chkEmbedAnimations = new CheckBox {
                 Content = "Embed animations",
@@ -137,9 +139,14 @@ namespace CrossSlash {
             pickerColumns.Children.Add(modelColumn);
 
             var animationColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-            animationColumn.Children.Add(_animationTitle);
+            var animationHeader = new Grid();
+            animationHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            animationHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            animationHeader.Children.Add(_animationTitle);
+            Grid.SetColumn(_chkAllCompatible, 1);
+            animationHeader.Children.Add(_chkAllCompatible);
+            animationColumn.Children.Add(animationHeader);
             animationColumn.Children.Add(CreateAnimationSearch());
-            animationColumn.Children.Add(_chkAllCompatible);
             animationColumn.Children.Add(_lstAnimations);
             Grid.SetColumn(animationColumn, 1);
             pickerColumns.Children.Add(animationColumn);
