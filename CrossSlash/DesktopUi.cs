@@ -53,17 +53,18 @@ namespace CrossSlash {
             ApplyThemeResources(window);
 
             UIElement body = scrollContent
-                ? new ScrollViewer {
+                ? CreateCard(new ScrollViewer {
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                    Padding = new Thickness(24),
-                    Content = CreateCard(content),
-                }
+                    Padding = new Thickness(0),
+                    Content = content,
+                })
                 : content;
             window.Content = body;
         }
 
         private static void ApplyThemeResources(Window window) {
+            Style scrollBarStyle = LoadScrollBarStyle();
             window.Resources[SystemColors.WindowBrushKey] = Surface;
             window.Resources[SystemColors.WindowTextBrushKey] = TextPrimary;
             window.Resources[SystemColors.ControlBrushKey] = SurfaceRaised;
@@ -78,12 +79,11 @@ namespace CrossSlash {
             window.Resources[SystemColors.MenuTextBrushKey] = TextPrimary;
             window.Resources[SystemColors.ScrollBarBrushKey] = SurfaceRaised;
             window.Resources[typeof(CheckBox)] = CreateCheckBoxStyle();
-            window.Resources[typeof(ListBox)] = CreateListBoxStyle();
+            window.Resources[typeof(ListBox)] = CreateListBoxStyle(scrollBarStyle);
             window.Resources[typeof(ListBoxItem)] = CreateListBoxItemStyle();
-            window.Resources[typeof(ComboBox)] = CreateComboBoxStyle();
+            window.Resources[typeof(ComboBox)] = CreateComboBoxStyle(scrollBarStyle);
             window.Resources[typeof(ComboBoxItem)] = CreateComboBoxItemStyle();
-            window.Resources[typeof(ScrollBar)] = CreateScrollBarStyle();
-            window.Resources[typeof(Thumb)] = CreateScrollThumbStyle();
+            window.Resources[typeof(ScrollBar)] = scrollBarStyle;
             window.Resources[typeof(TabControl)] = CreateTabControlStyle();
             window.Resources[typeof(TabItem)] = CreateTabItemStyle();
         }
@@ -142,7 +142,7 @@ namespace CrossSlash {
             return style;
         }
 
-        private static Style CreateListBoxStyle() {
+        private static Style CreateListBoxStyle(Style scrollBarStyle) {
             var border = new FrameworkElementFactory(typeof(Border), "ListBoxBorder");
             border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
             border.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Control.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
@@ -163,8 +163,7 @@ namespace CrossSlash {
             border.AppendChild(scrollViewer);
 
             var template = new ControlTemplate(typeof(ListBox)) { VisualTree = border };
-            template.Resources[typeof(ScrollBar)] = CreateScrollBarStyle();
-            template.Resources[typeof(Thumb)] = CreateScrollThumbStyle();
+            template.Resources[typeof(ScrollBar)] = scrollBarStyle;
 
             var style = new Style(typeof(ListBox));
             style.Setters.Add(new Setter(Control.BackgroundProperty, InputBackground));
@@ -191,7 +190,7 @@ namespace CrossSlash {
             return style;
         }
 
-        private static Style CreateComboBoxStyle() {
+        private static Style CreateComboBoxStyle(Style scrollBarStyle) {
             var style = new Style(typeof(ComboBox));
             style.Setters.Add(new Setter(Control.BackgroundProperty, InputBackground));
             style.Setters.Add(new Setter(Control.ForegroundProperty, TextPrimary));
@@ -200,11 +199,11 @@ namespace CrossSlash {
             style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 6, 8, 6)));
             style.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
             style.Setters.Add(new Setter(ItemsControl.ItemContainerStyleProperty, CreateComboBoxItemStyle()));
-            style.Setters.Add(new Setter(Control.TemplateProperty, CreateComboBoxTemplate()));
+            style.Setters.Add(new Setter(Control.TemplateProperty, CreateComboBoxTemplate(scrollBarStyle)));
             return style;
         }
 
-        private static ControlTemplate CreateComboBoxTemplate() {
+        private static ControlTemplate CreateComboBoxTemplate(Style scrollBarStyle) {
             var outerBorder = new FrameworkElementFactory(typeof(Border), "comboBorder");
             outerBorder.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
             outerBorder.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Control.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
@@ -280,8 +279,7 @@ namespace CrossSlash {
             root.AppendChild(popup);
 
             var template = new ControlTemplate(typeof(ComboBox)) { VisualTree = root };
-            template.Resources[typeof(ScrollBar)] = CreateScrollBarStyle();
-            template.Resources[typeof(Thumb)] = CreateScrollThumbStyle();
+            template.Resources[typeof(ScrollBar)] = scrollBarStyle;
             var focused = new Trigger { Property = UIElement.IsKeyboardFocusWithinProperty, Value = true };
             focused.Setters.Add(new Setter(Border.BorderBrushProperty, Accent, "comboBorder"));
             template.Triggers.Add(focused);
@@ -303,46 +301,13 @@ namespace CrossSlash {
             return style;
         }
 
-        private static Style CreateScrollBarStyle() {
-            var style = new Style(typeof(ScrollBar));
-            style.Setters.Add(new Setter(Control.BackgroundProperty, InputBackground));
-            style.Setters.Add(new Setter(Control.ForegroundProperty, TextSecondary));
-            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
-            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
-            style.Setters.Add(new Setter(FrameworkElement.WidthProperty, 10d));
-            style.Setters.Add(new Setter(FrameworkElement.HeightProperty, double.NaN));
-            var horizontalStyle = new Trigger { Property = ScrollBar.OrientationProperty, Value = Orientation.Horizontal };
-            horizontalStyle.Setters.Add(new Setter(FrameworkElement.WidthProperty, double.NaN));
-            horizontalStyle.Setters.Add(new Setter(FrameworkElement.HeightProperty, 10d));
-            style.Triggers.Add(horizontalStyle);
-            return style;
+        private static Style LoadScrollBarStyle() {
+            string assemblyName = typeof(DesktopUi).Assembly.GetName().Name!;
+            var resources = new ResourceDictionary {
+                Source = new Uri($"/{assemblyName};component/ScrollBarStyles.xaml", UriKind.Relative),
+            };
+            return (Style)resources[typeof(ScrollBar)];
         }
-
-        private static ControlTemplate CreateScrollThumbTemplate() {
-            var border = new FrameworkElementFactory(typeof(Border), "thumbBorder");
-            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(5));
-            border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Control.Background)) { RelativeSource = RelativeSource.TemplatedParent });
-            border.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Control.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
-            border.SetBinding(Border.BorderThicknessProperty, new Binding(nameof(Control.BorderThickness)) { RelativeSource = RelativeSource.TemplatedParent });
-            var template = new ControlTemplate(typeof(Thumb)) { VisualTree = border };
-            var hover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
-            hover.Setters.Add(new Setter(Border.BackgroundProperty, Brush("#65788A"), "thumbBorder"));
-            template.Triggers.Add(hover);
-            var dragging = new Trigger { Property = Thumb.IsDraggingProperty, Value = true };
-            dragging.Setters.Add(new Setter(Border.BackgroundProperty, Accent, "thumbBorder"));
-            template.Triggers.Add(dragging);
-            return template;
-        }
-
-        private static Style CreateScrollThumbStyle() {
-            var style = new Style(typeof(Thumb));
-            style.Setters.Add(new Setter(Control.BackgroundProperty, SurfaceRaised));
-            style.Setters.Add(new Setter(Control.BorderBrushProperty, ControlBorder));
-            style.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
-            style.Setters.Add(new Setter(Control.TemplateProperty, CreateScrollThumbTemplate()));
-            return style;
-        }
-
         private static Style CreateTabControlStyle() {
             var style = new Style(typeof(TabControl));
             style.Setters.Add(new Setter(Control.BackgroundProperty, PageBackground));
@@ -431,8 +396,8 @@ namespace CrossSlash {
             Background = Surface,
             BorderBrush = ControlBorder,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(22),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(14),
             Child = content,
         };
 

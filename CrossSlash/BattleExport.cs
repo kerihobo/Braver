@@ -130,7 +130,7 @@ namespace CrossSlash {
         }
 
         private UIElement CreateBattleModelContent() {
-            var panel = new StackPanel { Margin = new Thickness(12) };
+            var panel = new StackPanel();
             panel.Children.Add(DesktopUi.CreateSectionTitle("Battle models"));
             panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Search the list and select a model to export."));
             panel.Children.Add(DesktopUi.CreateFormRow("Available models", CreateModelPicker()));
@@ -146,7 +146,7 @@ namespace CrossSlash {
         }
 
         private UIElement CreateBattlefieldContent() {
-            var panel = new StackPanel { Margin = new Thickness(12) };
+            var panel = new StackPanel();
             panel.Children.Add(DesktopUi.CreateSectionTitle("Battlefields"));
             panel.Children.Add(DesktopUi.CreateHint($"{_battlefieldCodes.Count:N0} battlefield skeletons detected. Select one or enter a location code manually."));
             panel.Children.Add(DesktopUi.CreateFormRow("Available battlefields", _lstBattlefields));
