@@ -12,6 +12,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace CrossSlash {
 
@@ -49,6 +50,9 @@ namespace CrossSlash {
         private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations;
         private readonly WrapPanel _exportOptions;
         private StackPanel? _optionsPanel;
+        private readonly ModelPreviewControl _modelPreview;
+        private readonly DispatcherTimer _previewTimer;
+        private Grid? _previewHost;
         private readonly TextBox _txtModelSearch, _txtScale, _txtBattlefield;
         private readonly ListBox _lstModels, _lstBattlefields;
         private readonly List<string> _modelCodes;
@@ -61,6 +65,13 @@ namespace CrossSlash {
         public BattleExportWindow(DataSource source, bool magicModels = false) {
             _source = source;
             _magicModels = magicModels;
+            _modelPreview = new ModelPreviewControl { Height = 340 };
+            _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            _previewTimer.Tick += (_, _) => {
+                _previewTimer.Stop();
+                RefreshPreview();
+            };
+            Closed += (_, _) => _previewTimer.Stop();
             _modelCodes = magicModels
                 ? ModelBatchDiscovery.FindMagicModels(source)
                 : ModelBatchDiscovery.FindBattleModels(source);
@@ -102,6 +113,13 @@ namespace CrossSlash {
             _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 18, 8) };
             _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 18, 8) };
             _chkEmbedAnimations = new CheckBox { Content = "Embed animations", IsChecked = true, Margin = new Thickness(0, 0, 18, 8) };
+            _chkSRGB.Checked += (_, _) => SchedulePreview();
+            _chkSRGB.Unchecked += (_, _) => SchedulePreview();
+            _chkSwapWinding.Checked += (_, _) => SchedulePreview();
+            _chkSwapWinding.Unchecked += (_, _) => SchedulePreview();
+            _chkBakeColours.Checked += (_, _) => SchedulePreview();
+            _chkBakeColours.Unchecked += (_, _) => SchedulePreview();
+            _txtScale.TextChanged += (_, _) => SchedulePreview();
             _exportOptions = new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 16),
                 Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations },
@@ -138,7 +156,26 @@ namespace CrossSlash {
             var panel = new StackPanel();
             panel.Children.Add(DesktopUi.CreateSectionTitle("Battle models"));
             panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} models detected. Search the list and select a model to export."));
-            panel.Children.Add(DesktopUi.CreateFormRow("Available models", CreateModelPicker()));
+
+            var columns = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.34, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.66, GridUnitType.Star) });
+            var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
+            modelColumn.Children.Add(DesktopUi.CreateFormRow("Available models", CreateModelPicker()));
+            columns.Children.Add(modelColumn);
+
+            var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
+            var previewHost = new Grid { Height = 340 };
+            previewColumn.Children.Add(previewHost);
+            Grid.SetColumn(previewColumn, 1);
+            columns.Children.Add(previewColumn);
+            MovePreviewTo(previewHost);
+
+            _lstModels.SelectionChanged += (_, _) => SchedulePreview();
+            if (_lstModels.SelectedItem is string)
+                SchedulePreview();
+            panel.Children.Add(columns);
 
             var export = DesktopUi.CreateButton("Export model", primary: true);
             export.Click += (_, _) => BtnExport_Clicked();
@@ -191,9 +228,24 @@ namespace CrossSlash {
                 modelList.SelectedIndex = 0;
 
             var panel = new StackPanel();
-            panel.Children.Add(DesktopUi.CreateSectionTitle($"Models ({modelCodes.Count:N0})"));
-            panel.Children.Add(DesktopUi.CreateSearchField($"Search {group.ToLowerInvariant()} models…", search));
-            panel.Children.Add(modelList);
+            var columns = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.34, GridUnitType.Star) });
+            columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.66, GridUnitType.Star) });
+
+            var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
+            modelColumn.Children.Add(DesktopUi.CreateSectionTitle($"Models ({modelCodes.Count:N0})"));
+            modelColumn.Children.Add(DesktopUi.CreateSearchField($"Search {group.ToLowerInvariant()} models…", search));
+            modelColumn.Children.Add(modelList);
+            columns.Children.Add(modelColumn);
+
+            var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
+            var previewHost = new Grid { Height = 340 };
+            previewColumn.Children.Add(previewHost);
+            Grid.SetColumn(previewColumn, 1);
+            columns.Children.Add(previewColumn);
+            panel.Children.Add(columns);
+            modelList.SelectionChanged += (_, _) => SchedulePreview();
 
             var export = DesktopUi.CreateButton("Export selected", primary: true);
             export.Click += (_, _) => BtnExport_Clicked();
@@ -206,7 +258,7 @@ namespace CrossSlash {
             return new TabItem {
                 Header = group,
                 Content = panel,
-                Tag = new MagicModelTabState(group, modelCodes, modelList, panel),
+                Tag = new MagicModelTabState(group, modelCodes, modelList, panel, previewHost),
             };
         }
 
@@ -217,10 +269,21 @@ namespace CrossSlash {
             _activeMagicModelGroup = state.Group;
             _activeMagicModelCodes = state.ModelCodes;
             _activeMagicModelList = state.ModelList;
+            MovePreviewTo(state.PreviewHost);
             MoveExportOptionsTo(state.Panel);
+            SchedulePreview();
         }
 
-        private sealed record MagicModelTabState(string Group, List<string> ModelCodes, ListBox ModelList, StackPanel Panel);
+        private sealed record MagicModelTabState(string Group, List<string> ModelCodes, ListBox ModelList, StackPanel Panel, Grid PreviewHost);
+
+        private void MovePreviewTo(Grid host) {
+            if (ReferenceEquals(_previewHost, host))
+                return;
+            if (_previewHost != null)
+                _previewHost.Children.Remove(_modelPreview);
+            host.Children.Add(_modelPreview);
+            _previewHost = host;
+        }
 
         private void MoveExportOptionsToSelectedTab(TabControl tabs) {
             if (tabs.SelectedItem is TabItem { Content: StackPanel panel } tab) {
@@ -238,6 +301,31 @@ namespace CrossSlash {
                 _optionsPanel.Children.Remove(_exportOptions);
             panel.Children.Insert(Math.Max(0, panel.Children.Count - 1), _exportOptions);
             _optionsPanel = panel;
+        }
+
+        private void SchedulePreview() {
+            _previewTimer.Stop();
+            _previewTimer.Start();
+        }
+
+        private void RefreshPreview() {
+            ListBox? modelList = _magicModels ? _activeMagicModelList : _lstModels;
+            if (modelList?.SelectedItem is not string modelCode) {
+                _modelPreview.ShowMessage("Select a model to preview");
+                return;
+            }
+            if (!float.TryParse(_txtScale.Text, out float scale)) {
+                _modelPreview.ShowMessage("Enter a valid scale to preview this model");
+                return;
+            }
+
+            try {
+                var exporter = new BattleModel(_source, GetOptions(scale));
+                var model = exporter.BuildSceneAuto(modelCode, includeAnimations: true);
+                _modelPreview.ShowModel(model, modelCode);
+            } catch (Exception ex) {
+                _modelPreview.ShowMessage($"Could not preview {modelCode}: {ex.Message}");
+            }
         }
 
         private UIElement CreateModelPicker() {

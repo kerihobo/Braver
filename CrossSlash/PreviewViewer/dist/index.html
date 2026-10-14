@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CrossSlash model preview</title>
+    <script type="module" crossorigin src="./assets/index-CxInILj6.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-Brk1mNmF.css">
+  </head>
+  <body>
+    <main id="viewer">
+      <canvas id="model-canvas" aria-label="3D model preview"></canvas>
+      <div id="empty-state">Choose a model to preview</div>
+
+      <div id="model-label" aria-live="polite"></div>
+
+      <section id="controls" aria-label="Animation controls">
+        <div class="control-row">
+          <select id="animation-select" aria-label="Animation" disabled>
+            <option>No animations</option>
+          </select>
+          <button id="play-button" type="button" disabled>Play</button>
+          <button id="reset-button" type="button" disabled>Reset</button>
+        </div>
+        <div class="control-row timeline-row">
+          <input id="timeline" type="range" min="0" max="1000" value="0" disabled aria-label="Animation position" />
+          <span id="time-label">0.00 / 0.00 s</span>
+          <select id="speed-select" aria-label="Playback speed">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+          </select>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,111 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", sans-serif;
+  color: #e7edf3;
+  background: #202a35;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #viewer {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+#viewer {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: #202a35;
+}
+
+#model-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  outline: none;
+}
+
+#empty-state {
+  position: absolute;
+  inset: 0 0 68px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: #b3c0cc;
+  text-align: center;
+  pointer-events: none;
+}
+
+#empty-state.visible { display: flex; }
+
+#model-label {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  padding: 5px 9px;
+  border: 1px solid #506171;
+  border-radius: 4px;
+  background: rgb(24 34 45 / 88%);
+  color: #e7edf3;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#controls {
+  display: grid;
+  gap: 7px;
+  padding: 9px 10px 10px;
+  border-top: 1px solid #506171;
+  background: #293643;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+select, button, input { font: inherit; }
+
+select, button {
+  min-height: 28px;
+  border: 1px solid #506171;
+  border-radius: 3px;
+  background: #222d38;
+  color: #e7edf3;
+}
+
+select { min-width: 0; padding: 3px 7px; }
+button { padding: 3px 10px; cursor: pointer; }
+button:hover:not(:disabled) { background: #344352; }
+button:disabled, select:disabled { opacity: 0.55; cursor: default; }
+
+#animation-select { flex: 1; }
+
+.timeline-row input[type="range"] {
+  flex: 1;
+  min-width: 40px;
+  accent-color: #4b91d9;
+}
+
+#time-label {
+  min-width: 88px;
+  color: #b3c0cc;
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#speed-select { width: 66px; }

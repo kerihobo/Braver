@@ -10,6 +10,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace CrossSlash {
     public class FieldExport : ExportKind {
@@ -51,9 +52,18 @@ namespace CrossSlash {
         private readonly CheckBox _chkBakeColours;
         private readonly TextBlock _modelTitle, _animationTitle;
         private readonly DataSource _source;
+        private readonly ModelPreviewControl _preview;
+        private readonly DispatcherTimer _previewTimer;
 
         public FieldExportWindow(DataSource source) {
             _source = source;
+            _preview = new ModelPreviewControl { Height = 340 };
+            _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            _previewTimer.Tick += (_, _) => {
+                _previewTimer.Stop();
+                RefreshPreview();
+            };
+            Closed += (_, _) => _previewTimer.Stop();
             _hrcFiles = source.AllFiles
                 .Where(file => Path.GetExtension(file).Equals(".hrc", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
@@ -108,10 +118,10 @@ namespace CrossSlash {
                 IsChecked = true,
                 Margin = new Thickness(0, 0, 18, 8),
             };
-            _chkEmbedAnimations.Checked += (_, _) => UpdateAnimationControlState();
-            _chkEmbedAnimations.Unchecked += (_, _) => UpdateAnimationControlState();
-            _chkAllCompatible.Checked += (_, _) => UpdateAnimationControlState();
-            _chkAllCompatible.Unchecked += (_, _) => UpdateAnimationControlState();
+            _chkEmbedAnimations.Checked += (_, _) => { UpdateAnimationControlState(); SchedulePreview(); };
+            _chkEmbedAnimations.Unchecked += (_, _) => { UpdateAnimationControlState(); SchedulePreview(); };
+            _chkAllCompatible.Checked += (_, _) => { UpdateAnimationControlState(); SchedulePreview(); };
+            _chkAllCompatible.Unchecked += (_, _) => { UpdateAnimationControlState(); SchedulePreview(); };
             UpdateAnimationControlState();
             _lstAnimations.SelectionChanged += (_, e) => {
                 if (_refreshingAnimationList)
@@ -120,8 +130,12 @@ namespace CrossSlash {
                     _selectedAnimationFiles.Remove(animation);
                 foreach (string animation in e.AddedItems.Cast<string>())
                     _selectedAnimationFiles.Add(animation);
+                SchedulePreview();
             };
-            _lvHRCs.SelectionChanged += (_, _) => RefreshCompatibleAnimations();
+            _lvHRCs.SelectionChanged += (_, _) => {
+                RefreshCompatibleAnimations();
+                SchedulePreview();
+            };
             _lvHRCs.Loaded += (_, _) => {
                 if (_lvHRCs.SelectedIndex < 0 && _lvHRCs.Items.Count > 0)
                     _lvHRCs.SelectedIndex = 0;
@@ -130,12 +144,19 @@ namespace CrossSlash {
             _chkSRGB = new CheckBox { Content = "Convert colours from sRGB to linear", IsChecked = true, Margin = new Thickness(0, 0, 18, 8) };
             _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 18, 8) };
             _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 18, 8) };
+            _chkSRGB.Checked += (_, _) => SchedulePreview();
+            _chkSRGB.Unchecked += (_, _) => SchedulePreview();
+            _chkSwapWinding.Checked += (_, _) => SchedulePreview();
+            _chkSwapWinding.Unchecked += (_, _) => SchedulePreview();
+            _chkBakeColours.Checked += (_, _) => SchedulePreview();
+            _chkBakeColours.Unchecked += (_, _) => SchedulePreview();
 
             var content = new StackPanel();
 
             var pickerColumns = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-            pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.31, GridUnitType.Star) });
+            pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.31, GridUnitType.Star) });
+            pickerColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.38, GridUnitType.Star) });
 
             var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
             modelColumn.Children.Add(_modelTitle);
@@ -154,6 +175,12 @@ namespace CrossSlash {
             animationColumn.Children.Add(_lstAnimations);
             Grid.SetColumn(animationColumn, 1);
             pickerColumns.Children.Add(animationColumn);
+
+            var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+            previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
+            previewColumn.Children.Add(_preview);
+            Grid.SetColumn(previewColumn, 2);
+            pickerColumns.Children.Add(previewColumn);
 
             content.Children.Add(pickerColumns);
             content.Children.Add(new WrapPanel {
@@ -360,6 +387,35 @@ namespace CrossSlash {
                 _refreshingAnimationList = false;
             }
             UpdateAnimationControlState();
+        }
+
+        private void SchedulePreview() {
+            _previewTimer.Stop();
+            _previewTimer.Start();
+        }
+
+        private void RefreshPreview() {
+            if (_lvHRCs.SelectedItem is not string hrcFile) {
+                _preview.ShowMessage("Select a field model to preview");
+                return;
+            }
+
+            try {
+                IEnumerable<string> animations = _chkAllCompatible.IsChecked == true || _chkEmbedAnimations.IsChecked != true
+                    ? _compatibleAnimationFiles
+                    : _selectedAnimationFiles.Where(_compatibleAnimationFiles.Contains).ToList();
+                var exporter = new FieldModel(_source, GetOptions());
+                var model = exporter.BuildScene(
+                    hrcFile,
+                    animations,
+                    compatibleAnimationsOnly: true,
+                    out _,
+                    includeAnimations: true
+                );
+                _preview.ShowModel(model, hrcFile);
+            } catch (Exception ex) {
+                _preview.ShowMessage($"Could not preview {hrcFile}: {ex.Message}");
+            }
         }
 
         private void UpdateAnimationControlState() {
