@@ -261,7 +261,7 @@ namespace Ficedula.FF7.Exporters {
 
         public SharpGLTF.Schema2.ModelRoot BuildSceneAuto(string name, bool includeMeshes = true, bool includeAnimations = true) {
             if (_source.Exists(name + ".a00"))
-                return BuildSceneFromSummon(name, includeMeshes, includeAnimations);
+                return BuildSceneFromMagicModel(name, includeMeshes, includeAnimations);
             else if (IsBattleLocation(_source, name))
                 return BuildSceneFromBattleLocation(name);
             else if (_source.Exists(name + "DA"))
@@ -270,21 +270,24 @@ namespace Ficedula.FF7.Exporters {
                 throw new Exception($"Can't detect battle model type");
         }
 
-        public SharpGLTF.Schema2.ModelRoot BuildSceneFromSummon(string summonName, bool includeMeshes = true, bool includeAnimations = true) {
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromSummon(string summonName, bool includeMeshes = true, bool includeAnimations = true) =>
+            BuildSceneFromMagicModel(summonName, includeMeshes, includeAnimations);
+
+        public SharpGLTF.Schema2.ModelRoot BuildSceneFromMagicModel(string modelName, bool includeMeshes = true, bool includeAnimations = true) {
             //TODO - very similar to code in main Braver project - move into Ficedula.FF7
-            var texs = Enumerable.Range(0, 99).Select(i => $"{summonName}.t{i:00}");
+            var texs = Enumerable.Range(0, 99).Select(i => $"{modelName}.t{i:00}");
             int part = 0;
             Func<string?> NextData = () => {
                 string data;
                 do {
                     if (part >= 99)
                         return null;
-                    data = $"{summonName}.p{part:00}";
+                    data = $"{modelName}.p{part:00}";
                     part++;
                 } while (!_source.Exists(data));
                 return data;
             };
-            return BuildScene(summonName + ".d", summonName + ".a00", texs, NextData,
+            return BuildScene(modelName + ".d", modelName + ".a00", texs, NextData,
                 includeMeshes: includeMeshes, includeAnimations: includeAnimations);
         }
 

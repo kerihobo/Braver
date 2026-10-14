@@ -13,7 +13,7 @@ namespace CrossSlash {
         private readonly BattleModelOptions _options = new() { Scale = 0.1f };
 
         public override string Help =>
-@"Usage: CrossSlash MagicModel [SourceLGPOrFolder] [OutputFile] [SummonCode] [options]
+@"Usage: CrossSlash MagicModel [SourceLGPOrFolder] [OutputFile] [MagicModelCode] [options]
     Valid options:
         /ConvertSRGBToLinear - convert colours to linear RGB
         /SwapWinding - reverse triangle winding order
@@ -28,7 +28,7 @@ namespace CrossSlash {
 
         public override void Execute(DataSource source, string dest, IEnumerable<string> parameters) {
             var exporter = new BattleModel(source, _options);
-            exporter.BuildSceneFromSummon(parameters.First()).SaveGLB(dest);
+            exporter.BuildSceneFromMagicModel(parameters.First()).SaveGLB(dest);
         }
 
         public override Window ExecuteGui(DataSource source) => new BattleExportWindow(source, magicModels: true);

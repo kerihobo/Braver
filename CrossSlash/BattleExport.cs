@@ -20,7 +20,7 @@ namespace CrossSlash {
 
         public override string Help =>
 @"Usage: CrossSlash BattleExport [SourceLGPOrFolder] [OutputFile] [ModelCode] [options]
-        ModelCode can be a two letter battle model code (e.g. RV), a battlefield code/file (e.g. px or pxaa), or a summon model code (e.g. cyvadat)
+        ModelCode can be a two letter battle model code (e.g. RV), a battlefield code/file (e.g. px or pxaa), or a magic model code (e.g. cyvadat)
     Valid options:
         /ConvertSRGBToLinear - convert colours to linear RGB
         /SwapWinding - reverse triangle winding order
@@ -54,6 +54,9 @@ namespace CrossSlash {
         private readonly List<string> _modelCodes;
         private readonly List<string> _battlefieldCodes;
         private readonly ICollectionView _modelView;
+        private ListBox? _activeMagicModelList;
+        private IReadOnlyList<string> _activeMagicModelCodes = Array.Empty<string>();
+        private string _activeMagicModelGroup = "Magic";
 
         public BattleExportWindow(DataSource source, bool magicModels = false) {
             _source = source;
@@ -108,9 +111,10 @@ namespace CrossSlash {
 
             if (_magicModels)
             {
-                var magicContent = CreateMagicModelContent();
-                MoveExportOptionsTo(magicContent);
-                content.Children.Add(magicContent);
+                var magicTabs = CreateMagicModelContent();
+                magicTabs.SelectionChanged += (_, _) => ActivateMagicModelTab(magicTabs);
+                content.Children.Add(magicTabs);
+                ActivateMagicModelTab(magicTabs);
             }
             else {
                 var tabs = new TabControl { MinHeight = 430 };
@@ -160,21 +164,62 @@ namespace CrossSlash {
             return panel;
         }
 
-        private StackPanel CreateMagicModelContent() {
-            var panel = new StackPanel();
-            panel.Children.Add(DesktopUi.CreateSectionTitle("Summon models"));
-            panel.Children.Add(DesktopUi.CreateHint($"{_modelCodes.Count:N0} summons detected. Search the list and select a model to export."));
-            panel.Children.Add(DesktopUi.CreateFormRow("Available summons", CreateModelPicker()));
-
-            var export = DesktopUi.CreateButton("Export model", primary: true);
-            export.Click += (_, _) => BtnExport_Clicked();
-            var exportAll = DesktopUi.CreateButton("Export all summons");
-            exportAll.Click += (_, _) => BtnExportAll_Clicked();
-            var exportAnimations = DesktopUi.CreateButton("Export all animations");
-            exportAnimations.Click += (_, _) => BtnExportAllAnimations_Clicked();
-            panel.Children.Add(DesktopUi.CreateActionRow(export, exportAll, exportAnimations));
-            return panel;
+        private TabControl CreateMagicModelContent() {
+            var tabs = new TabControl { MinHeight = 430 };
+            tabs.Items.Add(CreateMagicModelTab("Magic", ModelBatchDiscovery.FindNonSummonMagicModels(_modelCodes)));
+            tabs.Items.Add(CreateMagicModelTab("Summon", ModelBatchDiscovery.FindSummonModels(_modelCodes)));
+            return tabs;
         }
+
+        private TabItem CreateMagicModelTab(string group, List<string> modelCodes) {
+            var search = DesktopUi.CreateSearchTextBox($"Search {group.ToLowerInvariant()} models");
+            var view = CollectionViewSource.GetDefaultView(modelCodes);
+            view.Filter = item => item is string code &&
+                (string.IsNullOrWhiteSpace(search.Text) || code.Contains(search.Text, StringComparison.OrdinalIgnoreCase));
+            search.TextChanged += (_, _) => view.Refresh();
+
+            var modelList = new ListBox {
+                ItemsSource = view,
+                MinHeight = 150,
+                MaxHeight = 230,
+                BorderBrush = DesktopUi.ControlBorderBrush,
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(4),
+            };
+            if (modelList.Items.Count > 0)
+                modelList.SelectedIndex = 0;
+
+            var panel = new StackPanel();
+            panel.Children.Add(DesktopUi.CreateSectionTitle($"Models ({modelCodes.Count:N0})"));
+            panel.Children.Add(DesktopUi.CreateSearchField($"Search {group.ToLowerInvariant()} models…", search));
+            panel.Children.Add(modelList);
+
+            var export = DesktopUi.CreateButton("Export selected", primary: true);
+            export.Click += (_, _) => BtnExport_Clicked();
+            var exportAll = DesktopUi.CreateButton($"Export all {group.ToLowerInvariant()} models");
+            exportAll.Click += (_, _) => BtnExportAll_Clicked(modelCodes, group);
+            var exportAnimations = DesktopUi.CreateButton($"Export all {group.ToLowerInvariant()} animations");
+            exportAnimations.Click += (_, _) => BtnExportAllAnimations_Clicked(modelCodes, group);
+            panel.Children.Add(DesktopUi.CreateActionRow(export, exportAll, exportAnimations));
+
+            return new TabItem {
+                Header = group,
+                Content = panel,
+                Tag = new MagicModelTabState(group, modelCodes, modelList, panel),
+            };
+        }
+
+        private void ActivateMagicModelTab(TabControl tabs) {
+            if (tabs.SelectedItem is not TabItem { Tag: MagicModelTabState state })
+                return;
+
+            _activeMagicModelGroup = state.Group;
+            _activeMagicModelCodes = state.ModelCodes;
+            _activeMagicModelList = state.ModelList;
+            MoveExportOptionsTo(state.Panel);
+        }
+
+        private sealed record MagicModelTabState(string Group, List<string> ModelCodes, ListBox ModelList, StackPanel Panel);
 
         private void MoveExportOptionsToSelectedTab(TabControl tabs) {
             if (tabs.SelectedItem is TabItem { Content: StackPanel panel })
@@ -201,7 +246,8 @@ namespace CrossSlash {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
-                if (_lstModels.SelectedItem is not string modelCode)
+                ListBox modelList = _magicModels ? _activeMagicModelList ?? _lstModels : _lstModels;
+                if (modelList.SelectedItem is not string modelCode)
                     throw new Exception("Select a model from the available models list.");
                 if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
@@ -220,24 +266,25 @@ namespace CrossSlash {
             }
         }
 
-        private void BtnExportAll_Clicked() {
+        private void BtnExportAll_Clicked(IReadOnlyList<string>? categoryModelCodes = null, string? category = null) {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
                 if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
-                var modelCodes = _magicModels
-                    ? ModelBatchDiscovery.FindMagicModels(_source)
-                    : ModelBatchDiscovery.FindBattleModels(_source);
+                var modelCodes = categoryModelCodes?.ToList() ?? (_magicModels
+                    ? _activeMagicModelCodes.ToList()
+                    : ModelBatchDiscovery.FindBattleModels(_source));
                 if (modelCodes.Count == 0) {
-                    string modelType = _magicModels ? "magic" : "battle";
+                    string modelType = _magicModels ? (category ?? _activeMagicModelGroup).ToLowerInvariant() : "battle";
                     throw new Exception($"No {modelType} models were found in the selected source.");
                 }
 
                 var preferences = PreferencesStore.Load();
+                string group = category ?? _activeMagicModelGroup;
                 string? outputDirectory = NativeFilePicker.OpenFolder(
-                    _magicModels ? "Choose a folder for all magic model exports" : "Choose a folder for all battle model exports",
+                    _magicModels ? $"Choose a folder for all {group.ToLowerInvariant()} model exports" : "Choose a folder for all battle model exports",
                     preferences.LastOutputDirectory,
                     this
                 );
@@ -263,7 +310,7 @@ namespace CrossSlash {
                     if (failures.Count > 5)
                         result += "\n...";
                 }
-                DesktopUi.ShowInfo(this, "Export All", result);
+                DesktopUi.ShowInfo(this, _magicModels ? $"Export All {group} Models" : "Export All", result);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Error", ex.Message);
             }
@@ -339,22 +386,23 @@ namespace CrossSlash {
             }
         }
 
-        private void BtnExportAllAnimations_Clicked() {
+        private void BtnExportAllAnimations_Clicked(IReadOnlyList<string>? categoryModelCodes = null, string? category = null) {
             try {
                 if (_source == null)
                     throw new Exception("No data source selected");
                 if (!float.TryParse(_txtScale.Text, out float scale))
                     throw new Exception("No scale specified");
 
-                var modelCodes = _magicModels
-                    ? ModelBatchDiscovery.FindMagicModels(_source)
-                    : ModelBatchDiscovery.FindBattleModels(_source);
+                var modelCodes = categoryModelCodes?.ToList() ?? (_magicModels
+                    ? _activeMagicModelCodes.ToList()
+                    : ModelBatchDiscovery.FindBattleModels(_source));
                 if (modelCodes.Count == 0)
                     throw new Exception("No models were found in the selected source.");
 
                 var preferences = PreferencesStore.Load();
+                string group = category ?? _activeMagicModelGroup;
                 string? outputDirectory = NativeFilePicker.OpenFolder(
-                    _magicModels ? "Choose a folder for all summon animations" : "Choose a folder for all battle animations",
+                    _magicModels ? $"Choose a folder for all {group.ToLowerInvariant()} animations" : "Choose a folder for all battle animations",
                     preferences.LastOutputDirectory,
                     this
                 );
@@ -386,7 +434,7 @@ namespace CrossSlash {
                     if (failures.Count > 5)
                         result += "\n...";
                 }
-                DesktopUi.ShowInfo(this, "Export All Animations", result);
+                DesktopUi.ShowInfo(this, _magicModels ? $"Export All {group} Animations" : "Export All Animations", result);
             } catch (Exception ex) {
                 DesktopUi.ShowError(this, "Error", ex.Message);
             }
@@ -410,6 +458,18 @@ namespace CrossSlash {
     }
 
     internal static class ModelBatchDiscovery {
+        // Vanilla magic.lgp contains summon rigs alongside spell/ability effect rigs.
+        // Keep the known summon file stems here; unrecognized magic skeletons remain
+        // available under the Magic tab so mods can add their own effects.
+        private static readonly HashSet<string> SummonMagicModelNames = new(
+            new[] {
+                "alexdat", "bahamdat", "bahamrda", "bahamzda", "cyvadat", "debcyoda",
+                "hadesdat", "ifreetda", "kujatada", "lamdat", "mogdat", "mogurida",
+                "odin_gda", "odin_zda", "pheonixd", "rivadat", "titandat", "tupondat",
+            }.Concat(Enumerable.Range(1, 13).Select(index => $"knight{index:00}")),
+            StringComparer.OrdinalIgnoreCase
+        );
+
         public static List<string> FindBattleModels(DataSource source) {
             return source.AllFiles
                 .Select(Path.GetFileName)
@@ -437,6 +497,16 @@ namespace CrossSlash {
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
+
+        public static List<string> FindNonSummonMagicModels(IEnumerable<string> modelCodes) =>
+            modelCodes
+                .Where(name => !SummonMagicModelNames.Contains(name))
+                .ToList();
+
+        public static List<string> FindSummonModels(IEnumerable<string> modelCodes) =>
+            modelCodes
+                .Where(SummonMagicModelNames.Contains)
+                .ToList();
 
         public static List<string> FindBattleLocations(DataSource source) {
             return source.AllFiles
