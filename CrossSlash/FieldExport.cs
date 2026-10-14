@@ -102,7 +102,7 @@ namespace CrossSlash {
             _chkEmbedAnimations = new CheckBox {
                 Content = "Embed animations",
                 IsChecked = true,
-                Margin = new Thickness(0, 0, 0, 8),
+                Margin = new Thickness(0, 0, 18, 8),
             };
             _chkEmbedAnimations.Checked += (_, _) => UpdateAnimationControlState();
             _chkEmbedAnimations.Unchecked += (_, _) => UpdateAnimationControlState();
@@ -152,10 +152,9 @@ namespace CrossSlash {
             pickerColumns.Children.Add(animationColumn);
 
             content.Children.Add(pickerColumns);
-            content.Children.Add(_chkEmbedAnimations);
             content.Children.Add(new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 16),
-                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours },
+                Children = { _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations },
             });
 
             var export = DesktopUi.CreateButton("Export selected", primary: true);
