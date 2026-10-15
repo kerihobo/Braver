@@ -25,6 +25,7 @@ namespace Ficedula.FF7.Field {
 
         public short DestX, DestY, ZZ2a, ZZ2b, SrcX, SrcY;
         public short SrcX2, SrcY2, Width, Height, PaletteID, Flags;
+        public short PrimarySrcX, PrimarySrcY, PrimaryTextureID;
         public byte Param, State, Blending, ZZ3, TypeTrans, ZZ4;
         public short TextureID, TextureID2, Depth;
         public int ZParam, UParam, VParam;
@@ -69,6 +70,9 @@ namespace Ficedula.FF7.Field {
             TextureID = source.ReadI16();
             TextureID2 = source.ReadI16();
             Depth = source.ReadI16();
+            PrimarySrcX = SrcX;
+            PrimarySrcY = SrcY;
+            PrimaryTextureID = TextureID;
             ZParam = source.ReadI32();
 
             UParam = source.ReadI32();
@@ -95,7 +99,9 @@ namespace Ficedula.FF7.Field {
     }
 
     public class TexturePage {
+        public short Depth;
         public List<byte[]> Data;
+        public List<ushort[]> DirectData;
     }
 
     public class Background {
@@ -167,8 +173,8 @@ namespace Ficedula.FF7.Field {
             if (source.ReadByte() != 0) {
                 source.Seek(4, SeekOrigin.Current);
                 numSprites2 = source.ReadI16();
+                source.Seek(20, SeekOrigin.Current);
                 if (numSprites2 > 0) {
-                    source.Seek(20, SeekOrigin.Current);
                     layer2 = Enumerable.Range(0, numSprites2)
                         .Select(_ => new Sprite(source, 1))
                         .ToArray();
@@ -178,8 +184,8 @@ namespace Ficedula.FF7.Field {
             if (source.ReadByte() != 0) {
                 source.Seek(4, SeekOrigin.Current);
                 numSprites3 = source.ReadI16();
+                source.Seek(14, SeekOrigin.Current);
                 if (numSprites3 > 0) {
-                    source.Seek(14, SeekOrigin.Current);
                     layer3 = Enumerable.Range(0, numSprites3)
                         .Select(_ => new Sprite(source, 2))
                         .ToArray();
@@ -189,9 +195,9 @@ namespace Ficedula.FF7.Field {
             if (source.ReadByte() != 0) {
                 source.Seek(4, SeekOrigin.Current);
                 numSprites4 = source.ReadI16();
+                source.Seek(14, SeekOrigin.Current);
                 if (numSprites4 > 0) {
-                    source.Seek(14, SeekOrigin.Current);
-                    layer4 = Enumerable.Range(0, numSprites3)
+                    layer4 = Enumerable.Range(0, numSprites4)
                         .Select(_ => new Sprite(source, 3))
                         .ToArray();
                 }
@@ -202,7 +208,6 @@ namespace Ficedula.FF7.Field {
             Layer3 = layer3;
             Layer4 = layer4;
 
-            byte[] pageData = new byte[256 * 256];
             //int numPages = allSprites.Max(s => s.TextureID) + 1;
 
             Pages = new();
@@ -215,16 +220,46 @@ namespace Ficedula.FF7.Field {
                 bool exists = source.ReadI16() != 0;
                 if (exists) {
                     short size = source.ReadI16(), depth = source.ReadI16();
-                    System.Diagnostics.Trace.Assert(depth == 1);
-                    source.Read(pageData, 0, pageData.Length);
+                    int bytesPerPage = depth switch {
+                        0 => 256 * 256 / 2,
+                        1 => 256 * 256,
+                        2 => 256 * 256 * 2,
+                        _ => throw new InvalidDataException($"Unsupported field texture depth {depth} on texture page {i} at offset 0x{source.Position - 4:X}.")
+                    };
+                    byte[] pageData = new byte[bytesPerPage];
+                    source.ReadExactly(pageData);
 
                     TexturePage page = new TexturePage {
-                        Data = new List<byte[]>()
+                        Depth = depth,
+                        Data = new List<byte[]>(),
+                        DirectData = new List<ushort[]>()
                     };
-                    foreach (int y in Enumerable.Range(0, 256)) {
-                        byte[] pixels = new byte[256];
-                        Buffer.BlockCopy(pageData, 256 * y, pixels, 0, 256);
-                        page.Data.Add(pixels);
+                    if (depth == 0) {
+                        foreach (int y in Enumerable.Range(0, 256)) {
+                            byte[] pixels = new byte[256];
+                            int rowOffset = y * 128;
+                            for (int x = 0; x < 128; x++) {
+                                byte packed = pageData[rowOffset + x];
+                                pixels[x * 2] = (byte)(packed & 0x0f);
+                                pixels[x * 2 + 1] = (byte)(packed >> 4);
+                            }
+                            page.Data.Add(pixels);
+                        }
+                    } else if (depth == 1) {
+                        foreach (int y in Enumerable.Range(0, 256)) {
+                            byte[] pixels = new byte[256];
+                            Buffer.BlockCopy(pageData, 256 * y, pixels, 0, 256);
+                            page.Data.Add(pixels);
+                        }
+                    } else {
+                        using var pageStream = new MemoryStream(pageData, writable: false);
+                        using var pageReader = new BinaryReader(pageStream);
+                        foreach (int y in Enumerable.Range(0, 256)) {
+                            ushort[] pixels = new ushort[256];
+                            for (int x = 0; x < 256; x++)
+                                pixels[x] = pageReader.ReadUInt16();
+                            page.DirectData.Add(pixels);
+                        }
                     }
                     /*
                     foreach (int dy in Enumerable.Range(0, 256))
@@ -237,7 +272,9 @@ namespace Ficedula.FF7.Field {
 #endif
                     Pages[i] = page;
 
-                    pages[i] = pageData.ToArray();
+                    pages[i] = depth == 0
+                        ? page.Data.SelectMany(row => row).ToArray()
+                        : pageData;
                 }
             }
 

@@ -109,6 +109,7 @@ namespace CrossSlash {
 
         private static string GetTabHeader(string key, ExportKind exporter) => key switch {
             "FieldModel" => "Field",
+            "FieldLocation" => "Field Locations",
             "BattleModel" => "Battle",
             "MagicModel" => "Magic",
             "Tex" => "Textures",

@@ -11,6 +11,7 @@ const resetButton = document.querySelector('#reset-button');
 const timeline = document.querySelector('#timeline');
 const timeLabel = document.querySelector('#time-label');
 const speedSelect = document.querySelector('#speed-select');
+const FF7_FIELD_VIEWPORT_HEIGHT = 240;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#202a35');
@@ -42,6 +43,10 @@ let flyPitch = 0;
 let flyMovementSpeed = 1;
 let currentModel = null;
 let currentModelName = '';
+let fieldCameraFit = null;
+let fieldViewState = null;
+let fieldPan = null;
+let fieldLocationWireframe = true;
 let mixer = null;
 let currentAction = null;
 let currentClip = null;
@@ -91,6 +96,15 @@ function resetCurrentModel() {
   currentAction = null;
   currentClip = null;
   currentModelName = '';
+  fieldCameraFit = null;
+  fieldViewState = null;
+  fieldPan = null;
+  camera.clearViewOffset();
+  if (canvas.clientWidth > 0 && canvas.clientHeight > 0) {
+    camera.aspect = canvas.clientWidth / canvas.clientHeight;
+    camera.updateProjectionMatrix();
+  }
+  canvas.classList.remove('field-preview', 'field-panning');
   currentAnimationName = '';
   isPlaying = false;
   playButton.textContent = 'Play';
@@ -323,7 +337,53 @@ export function setLighting(lighting) {
   scheduleFrame();
 }
 
-function fitCamera(root, zoomFactor = 1.2) {
+function applyFieldLocationWireframe() {
+  if (!currentModel || controlsMode !== 'field') return;
+  let edgeNode = null;
+  currentModel.scene.traverse((object) => {
+    if (!edgeNode && /walkmesh edges/i.test(object.name || ''))
+      edgeNode = object;
+  });
+  if (edgeNode)
+    edgeNode.visible = fieldLocationWireframe;
+}
+
+export function setFieldLocationWireframe(visible) {
+  fieldLocationWireframe = visible === true;
+  applyFieldLocationWireframe();
+  scheduleFrame();
+}
+
+function fitCamera(root, zoomFactor = 1.2, cameraMode = 'orbit') {
+  if (cameraMode === 'field') {
+    root.updateMatrixWorld(true);
+    const fieldCamera = root.getObjectByProperty('isCamera', true);
+    if (fieldCamera?.isPerspectiveCamera) {
+      const position = fieldCamera.getWorldPosition(new THREE.Vector3());
+      const orientation = fieldCamera.getWorldQuaternion(new THREE.Quaternion());
+      camera.position.copy(position);
+      camera.quaternion.copy(orientation);
+      camera.up.set(0, 1, 0).applyQuaternion(orientation).normalize();
+      camera.fov = fieldCamera.fov;
+      camera.near = fieldCamera.near;
+      camera.far = fieldCamera.far;
+      const backgroundSize = getFieldBackgroundSize(root, fieldCamera.aspect || 4 / 3);
+      fieldCameraFit = {
+        fov: fieldCamera.fov,
+        aspect: fieldCamera.aspect || 4 / 3,
+        fullWidth: backgroundSize.width,
+        fullHeight: backgroundSize.height,
+      };
+      fieldViewState = createFieldViewState(backgroundSize.width, backgroundSize.height, getCanvasAspect());
+      canvas.classList.add('field-preview');
+      updateFieldCameraProjection();
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize();
+      controls?.target.copy(position).addScaledVector(forward, 1000);
+      controls?.update();
+      return;
+    }
+  }
+
   camera.fov = controlsMode === 'fly' ? 50 : 42;
   camera.updateProjectionMatrix();
   root.updateMatrixWorld(true);
@@ -369,6 +429,164 @@ function fitCamera(root, zoomFactor = 1.2) {
   }
 }
 
+function getFieldBackgroundSize(root, aspect) {
+  let namedBackground = null;
+  let largestTexture = null;
+  root.traverse((object) => {
+    if (!object.isMesh) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      const image = material?.map?.image;
+      const width = image?.width || image?.naturalWidth || 0;
+      const height = image?.height || image?.naturalHeight || 0;
+      if (!(width > 0 && height > 0)) continue;
+      const size = { width, height };
+      if (/background/i.test(`${object.name} ${material?.name || ''}`))
+        namedBackground = size;
+      if (!largestTexture || width * height > largestTexture.width * largestTexture.height)
+        largestTexture = size;
+    }
+  });
+  const size = namedBackground || largestTexture;
+  return size || { width: Math.max(aspect * FF7_FIELD_VIEWPORT_HEIGHT, 1), height: FF7_FIELD_VIEWPORT_HEIGHT };
+}
+
+function createFieldViewState(fullWidth, fullHeight, viewportAspect) {
+  const zoomToFitHeight = FF7_FIELD_VIEWPORT_HEIGHT / fullHeight;
+  const zoomToFitWidth = (FF7_FIELD_VIEWPORT_HEIGHT * viewportAspect) / fullWidth;
+  const fitZoom = Math.min(zoomToFitHeight, zoomToFitWidth);
+  return {
+    fullWidth,
+    fullHeight,
+    centerX: fullWidth / 2,
+    centerY: fullHeight / 2,
+    zoom: fitZoom,
+    targetZoom: fitZoom,
+    minZoom: Math.min(0.1, fitZoom * 0.5),
+    maxZoom: 4.0,
+  };
+}
+
+function applyFieldViewOffset(viewState, viewportAspect) {
+  if (!viewState || !(viewportAspect > 0)) return;
+  const currentViewHeight = FF7_FIELD_VIEWPORT_HEIGHT / viewState.zoom;
+  const currentViewWidth = currentViewHeight * viewportAspect;
+  let viewX = viewState.centerX - currentViewWidth / 2;
+  let viewY = viewState.centerY - currentViewHeight / 2;
+
+  if (currentViewWidth >= viewState.fullWidth)
+    viewX = (viewState.fullWidth - currentViewWidth) / 2;
+  else
+    viewX = THREE.MathUtils.clamp(viewX, 0, viewState.fullWidth - currentViewWidth);
+
+  if (currentViewHeight >= viewState.fullHeight)
+    viewY = (viewState.fullHeight - currentViewHeight) / 2;
+  else
+    viewY = THREE.MathUtils.clamp(viewY, 0, viewState.fullHeight - currentViewHeight);
+
+  viewState.centerX = viewX + currentViewWidth / 2;
+  viewState.centerY = viewY + currentViewHeight / 2;
+  camera.setViewOffset(
+    viewState.fullWidth,
+    viewState.fullHeight,
+    viewX,
+    viewY,
+    currentViewWidth,
+    currentViewHeight
+  );
+  camera.updateProjectionMatrix();
+}
+
+function getCanvasAspect() {
+  return canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+}
+
+function updateFieldCameraProjection() {
+  if (!fieldCameraFit || !fieldViewState) return;
+  applyFieldViewOffset(fieldViewState, getCanvasAspect());
+}
+
+function resetFieldCameraView() {
+  if (!fieldCameraFit || !currentModel) return;
+  currentModel.scene.updateMatrixWorld(true);
+  const fieldCamera = currentModel.scene.getObjectByProperty('isCamera', true);
+  if (!fieldCamera?.isPerspectiveCamera) return;
+  const position = fieldCamera.getWorldPosition(new THREE.Vector3());
+  const orientation = fieldCamera.getWorldQuaternion(new THREE.Quaternion());
+  camera.position.copy(position);
+  camera.quaternion.copy(orientation);
+  camera.up.set(0, 1, 0).applyQuaternion(orientation).normalize();
+  camera.fov = fieldCameraFit.fov;
+  camera.near = fieldCamera.near;
+  camera.far = fieldCamera.far;
+  fieldViewState = createFieldViewState(fieldCameraFit.fullWidth, fieldCameraFit.fullHeight, getCanvasAspect());
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize();
+  controls?.target.copy(position).addScaledVector(forward, 1000);
+  controls?.update();
+  updateFieldCameraProjection();
+  scheduleFrame();
+}
+
+function onFieldWheel(event) {
+  if (controlsMode !== 'field' || !fieldViewState) return;
+  event.preventDefault();
+  const zoomFactor = event.deltaY > 0 ? 0.95 : 1.05;
+  fieldViewState.targetZoom = THREE.MathUtils.clamp(
+    fieldViewState.targetZoom * zoomFactor,
+    fieldViewState.minZoom,
+    fieldViewState.maxZoom
+  );
+  scheduleFrame();
+}
+
+function onFieldPointerDown(event) {
+  if (controlsMode !== 'field' || !fieldViewState || event.button !== 0) return;
+  fieldPan = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    centerX: fieldViewState.centerX,
+    centerY: fieldViewState.centerY,
+  };
+  canvas.classList.add('field-panning');
+  if (canvas.setPointerCapture)
+    canvas.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function onFieldPointerMove(event) {
+  if (controlsMode !== 'field' || !fieldPan || event.pointerId !== fieldPan.pointerId || !fieldViewState) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) return;
+  const viewHeight = FF7_FIELD_VIEWPORT_HEIGHT / fieldViewState.zoom;
+  const viewWidth = viewHeight * (rect.width / rect.height);
+  const deltaX = event.clientX - fieldPan.startX;
+  const deltaY = event.clientY - fieldPan.startY;
+  fieldViewState.centerX = fieldPan.centerX - (deltaX / rect.width) * viewWidth;
+  fieldViewState.centerY = fieldPan.centerY - (deltaY / rect.height) * viewHeight;
+  applyFieldViewOffset(fieldViewState, rect.width / rect.height);
+  scheduleFrame();
+  event.preventDefault();
+}
+
+function onFieldPointerUp(event) {
+  if (!fieldPan || event.pointerId !== fieldPan.pointerId) return;
+  fieldPan = null;
+  canvas.classList.remove('field-panning');
+  if (canvas.hasPointerCapture?.(event.pointerId))
+    canvas.releasePointerCapture(event.pointerId);
+}
+
+function onFieldDoubleClick(event) {
+  if (controlsMode !== 'field') return;
+  event.preventDefault();
+  resetFieldCameraView();
+}
+
+function onFieldContextMenu(event) {
+  if (controlsMode === 'field') event.preventDefault();
+}
+
 function ensureRenderer(cameraMode = 'orbit') {
   if (!renderer) {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
@@ -378,7 +596,7 @@ function ensureRenderer(cameraMode = 'orbit') {
     resize();
   }
 
-  const requestedMode = cameraMode === 'fly' ? 'fly' : 'orbit';
+  const requestedMode = cameraMode === 'fly' ? 'fly' : cameraMode === 'field' ? 'field' : 'orbit';
   if (controls && controlsMode === requestedMode) return;
   controls?.dispose();
   controls = null;
@@ -386,12 +604,23 @@ function ensureRenderer(cameraMode = 'orbit') {
   flyKeys.clear();
   flyDragging = false;
   flyPointerId = null;
-  canvas.classList.remove('fly-dragging');
-  if (controlsMode === 'orbit') {
+  canvas.classList.remove('fly-dragging', 'field-panning');
+  canvas.classList.toggle('field-preview', controlsMode === 'field');
+  if (controlsMode === 'orbit' || controlsMode === 'field') {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = true;
+    if (controlsMode === 'field') {
+      controls.enableZoom = false;
+      controls.enablePan = false;
+      controls.enableRotate = true;
+      controls.mouseButtons = {
+        LEFT: null,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE,
+      };
+    }
   }
   controls?.addEventListener('change', scheduleFrame);
 }
@@ -460,7 +689,8 @@ export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, camer
     }
     refreshStaticLightingTransforms(gltf.scene);
     isLoadingModel = false;
-    fitCamera(gltf.scene, cameraZoom);
+    fitCamera(gltf.scene, cameraZoom, cameraMode);
+    applyFieldLocationWireframe();
     setEmptyState('', false);
     scheduleFrame();
     postToHost({ type: 'preview-loaded' });
@@ -574,10 +804,22 @@ function resize() {
   const height = canvas.clientHeight;
   if (width <= 0 || height <= 0) return;
   renderer.setSize(width, height, false);
-  camera.aspect = width / height;
-  camera.updateProjectionMatrix();
+  if (fieldCameraFit) {
+    updateFieldCameraProjection();
+  } else {
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+  }
   scheduleFrame();
 }
+
+canvas.addEventListener('wheel', onFieldWheel, { passive: false });
+canvas.addEventListener('pointerdown', onFieldPointerDown, { capture: true });
+window.addEventListener('pointermove', onFieldPointerMove);
+window.addEventListener('pointerup', onFieldPointerUp);
+window.addEventListener('pointercancel', onFieldPointerUp);
+canvas.addEventListener('dblclick', onFieldDoubleClick);
+canvas.addEventListener('contextmenu', onFieldContextMenu);
 
 const resizeObserver = new ResizeObserver(resize);
 resizeObserver.observe(document.querySelector('#viewer'));
@@ -602,12 +844,24 @@ function animate() {
     }
   }
   let controlsMoving = false;
+  let fieldZoomMoving = false;
   if (controlsMode === 'fly')
     controlsMoving = updateFlyControls(delta);
   else
     controlsMoving = controls?.update() === true;
+  if (controlsMode === 'field' && fieldViewState) {
+    const zoomDifference = fieldViewState.targetZoom - fieldViewState.zoom;
+    if (Math.abs(zoomDifference) > 0.001) {
+      fieldViewState.zoom += zoomDifference * 0.15;
+      updateFieldCameraProjection();
+      fieldZoomMoving = true;
+    } else if (fieldViewState.zoom !== fieldViewState.targetZoom) {
+      fieldViewState.zoom = fieldViewState.targetZoom;
+      updateFieldCameraProjection();
+    }
+  }
   renderer.render(scene, camera);
-  if (isPlaying || controlsMoving)
+  if (isPlaying || controlsMoving || fieldZoomMoving)
     scheduleFrame();
 }
 

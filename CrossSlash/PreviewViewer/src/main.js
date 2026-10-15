@@ -18,6 +18,7 @@ let selectedLightingModelIndex = -1;
 let viewerModule = null;
 let viewerModulePromise = null;
 let visible = true;
+let fieldLocationWireframe = true;
 let modelRequest = 0;
 let animationRequest = 0;
 let viewerControlsSuppressed = false;
@@ -128,6 +129,12 @@ window.chrome?.webview?.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'field-location-wireframe') {
+    fieldLocationWireframe = message.visible === true;
+    viewerModule?.setFieldLocationWireframe(fieldLocationWireframe);
+    return;
+  }
+
   if (message.type === 'field-lighting-options') {
     const options = message.options || {};
     availableFields = options.fields || [];
@@ -162,16 +169,22 @@ window.chrome?.webview?.addEventListener('message', (event) => {
     const request = ++modelRequest;
     animationRequest++;
     const flyMode = message.cameraMode === 'fly';
+    const fieldMode = message.cameraMode === 'field';
     viewerControlsSuppressed = flyMode || message.hideControls === true;
     controlPanel.hidden = viewerControlsSuppressed;
     fieldLightingRow.hidden = viewerControlsSuppressed;
     document.querySelector('#model-canvas').title = flyMode
       ? 'Fly controls: drag to look; W/A/S/D to move; Q/E to descend and rise; Shift to move faster.'
-      : '';
+      : fieldMode
+        ? 'Field controls: scroll to zoom; drag with the left button to pan; drag with the right button to orbit; double-click to reset.'
+        : '';
     setEmptyState('Loading preview…');
     prepareViewer().then((module) => {
       if (request === modelRequest)
+      {
         module.loadModel(message.glbBase64, message.name || 'Model preview', message.lighting || null, message.cameraZoom, message.cameraMode || 'orbit');
+        module.setFieldLocationWireframe(fieldLocationWireframe);
+      }
     }).catch(showLoadError);
     return;
   }

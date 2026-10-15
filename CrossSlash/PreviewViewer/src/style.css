@@ -35,6 +35,8 @@ html, body, #viewer {
 }
 
 #model-canvas.fly-dragging { cursor: none; }
+#model-canvas.field-preview { cursor: grab; touch-action: none; }
+#model-canvas.field-preview.field-panning { cursor: grabbing; }
 
 #empty-state {
   position: absolute;

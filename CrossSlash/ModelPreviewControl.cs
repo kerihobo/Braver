@@ -20,10 +20,12 @@ namespace CrossSlash {
         private string? _pendingAnimationMessage;
         private string? _pendingLightingMessage;
         private string? _pendingFieldLightingMessage;
+        private string? _pendingFieldLocationWireframeMessage;
         private string? _lastViewerMessage;
         private string? _lastAnimationMessage;
         private string? _lastLightingMessage;
         private string? _lastFieldLightingMessage;
+        private bool? _fieldLocationWireframeVisible;
         private Action? _editLightsAction;
         private bool _initializationStarted;
         private bool _pageReady;
@@ -105,6 +107,8 @@ namespace CrossSlash {
                 target.ReceiveViewerMessage(_lastLightingMessage);
             if (_lastAnimationMessage != null)
                 target.ReceiveViewerMessage(_lastAnimationMessage);
+            if (_fieldLocationWireframeVisible.HasValue)
+                target.SetFieldLocationWireframe(_fieldLocationWireframeVisible.Value);
         }
 
         public void SetEditLightsAction(Action? action) {
@@ -124,6 +128,17 @@ namespace CrossSlash {
             SendPendingFieldLightingMessage();
         }
 
+        public void SetFieldLocationWireframe(bool visible) {
+            _fieldLocationWireframeVisible = visible;
+            string message = JsonSerializer.Serialize(new {
+                type = "field-location-wireframe",
+                visible,
+            });
+            _pendingFieldLocationWireframeMessage = message;
+            ViewerMessageProduced?.Invoke(message);
+            SendPendingFieldLocationWireframeMessage();
+        }
+
         public void ReceiveViewerAction(string action, string? value) => ViewerActionRequested?.Invoke(action, value);
 
         public void ReceiveViewerMessage(string message) {
@@ -139,6 +154,9 @@ namespace CrossSlash {
                 _lastFieldLightingMessage = message;
                 _pendingFieldLightingMessage = message;
                 SendPendingFieldLightingMessage();
+            } else if (type == "field-location-wireframe") {
+                bool visible = document.RootElement.TryGetProperty("visible", out JsonElement visibleElement) && visibleElement.GetBoolean();
+                SetFieldLocationWireframe(visible);
             } else if (type == "load-animation") {
                 _lastAnimationMessage = message;
                 _pendingAnimationMessage = message;
@@ -319,6 +337,7 @@ namespace CrossSlash {
                 SendPendingLightingMessage();
                 SendPendingFieldLightingMessage();
                 SendPendingAnimationMessage();
+                SendPendingFieldLocationWireframeMessage();
                 return;
             }
             _webView.CoreWebView2.PostWebMessageAsJson(_pendingMessage);
@@ -326,6 +345,7 @@ namespace CrossSlash {
             SendPendingLightingMessage();
             SendPendingFieldLightingMessage();
             SendPendingAnimationMessage();
+            SendPendingFieldLocationWireframeMessage();
         }
 
         private void SendPendingAnimationMessage() {
@@ -347,6 +367,13 @@ namespace CrossSlash {
                 return;
             _webView.CoreWebView2.PostWebMessageAsJson(_pendingFieldLightingMessage);
             _pendingFieldLightingMessage = null;
+        }
+
+        private void SendPendingFieldLocationWireframeMessage() {
+            if (!_pageReady || _pendingFieldLocationWireframeMessage == null || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(_pendingFieldLocationWireframeMessage);
+            _pendingFieldLocationWireframeMessage = null;
         }
 
         private void SendEditLightsVisibility() {
