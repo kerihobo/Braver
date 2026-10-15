@@ -26,6 +26,7 @@ namespace CrossSlash {
         private string? _lastLightingMessage;
         private string? _lastFieldLightingMessage;
         private bool? _fieldLocationWireframeVisible;
+        private bool _fieldLocationWireframeToggleVisible;
         private Action? _editLightsAction;
         private bool _initializationStarted;
         private bool _pageReady;
@@ -109,6 +110,7 @@ namespace CrossSlash {
                 target.ReceiveViewerMessage(_lastAnimationMessage);
             if (_fieldLocationWireframeVisible.HasValue)
                 target.SetFieldLocationWireframe(_fieldLocationWireframeVisible.Value);
+            target.SetFieldLocationWireframeToggleVisible(_fieldLocationWireframeToggleVisible);
         }
 
         public void SetEditLightsAction(Action? action) {
@@ -137,6 +139,11 @@ namespace CrossSlash {
             _pendingFieldLocationWireframeMessage = message;
             ViewerMessageProduced?.Invoke(message);
             SendPendingFieldLocationWireframeMessage();
+        }
+
+        public void SetFieldLocationWireframeToggleVisible(bool visible) {
+            _fieldLocationWireframeToggleVisible = visible;
+            SendFieldLocationWireframeToggleVisibility();
         }
 
         public void ReceiveViewerAction(string action, string? value) => ViewerActionRequested?.Invoke(action, value);
@@ -298,6 +305,7 @@ namespace CrossSlash {
                     SendPendingMessage();
                     SendEditLightsVisibility();
                     SendPopOutVisibility();
+                    SendFieldLocationWireframeToggleVisibility();
                     _webView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new {
                         type = "visibility",
                         visible = IsVisible,
@@ -313,6 +321,9 @@ namespace CrossSlash {
                     _editLightsAction?.Invoke();
                 } else if (type == "pop-out") {
                     Dispatcher.BeginInvoke(new Action(() => _popOutAction?.Invoke()));
+                } else if (type == "field-location-wireframe") {
+                    bool visible = root.TryGetProperty("visible", out JsonElement visibleElement) && visibleElement.GetBoolean();
+                    SetFieldLocationWireframe(visible);
                 } else if (type == "field-scene-selected") {
                     ViewerActionRequested?.Invoke("field-scene", root.TryGetProperty("fieldId", out JsonElement fieldIdElement) ? fieldIdElement.GetString() : null);
                 } else if (type == "lighting-model-selected") {
@@ -391,6 +402,15 @@ namespace CrossSlash {
             _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {
                 type = "pop-out-visibility",
                 visible = _popOutAction != null,
+            }));
+        }
+
+        private void SendFieldLocationWireframeToggleVisibility() {
+            if (!_pageReady || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {
+                type = "field-location-wireframe-visibility",
+                visible = _fieldLocationWireframeToggleVisible,
             }));
         }
 

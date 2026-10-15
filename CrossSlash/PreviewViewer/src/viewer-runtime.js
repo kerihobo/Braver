@@ -41,6 +41,8 @@ let flyLastPointer = { x: 0, y: 0 };
 let flyYaw = 0;
 let flyPitch = 0;
 let flyMovementSpeed = 1;
+let flyPointerButton = -1;
+let flyLookMoved = false;
 let currentModel = null;
 let currentModelName = '';
 let fieldCameraFit = null;
@@ -99,12 +101,17 @@ function resetCurrentModel() {
   fieldCameraFit = null;
   fieldViewState = null;
   fieldPan = null;
+  flyKeys.clear();
+  flyDragging = false;
+  flyPointerId = null;
+  flyPointerButton = -1;
+  flyLookMoved = false;
   camera.clearViewOffset();
   if (canvas.clientWidth > 0 && canvas.clientHeight > 0) {
     camera.aspect = canvas.clientWidth / canvas.clientHeight;
     camera.updateProjectionMatrix();
   }
-  canvas.classList.remove('field-preview', 'field-panning');
+  canvas.classList.remove('field-preview', 'field-panning', 'field-zooming');
   currentAnimationName = '';
   isPlaying = false;
   playButton.textContent = 'Play';
@@ -338,14 +345,13 @@ export function setLighting(lighting) {
 }
 
 function applyFieldLocationWireframe() {
-  if (!currentModel || controlsMode !== 'field') return;
-  let edgeNode = null;
+  if (!currentModel) return;
   currentModel.scene.traverse((object) => {
-    if (!edgeNode && /walkmesh edges/i.test(object.name || ''))
-      edgeNode = object;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    const names = [object.name, ...materials.map((material) => material?.name)].filter(Boolean).join(' ');
+    if (/walkmesh/i.test(names) && /edge/i.test(names))
+      object.visible = fieldLocationWireframe;
   });
-  if (edgeNode)
-    edgeNode.visible = fieldLocationWireframe;
 }
 
 export function setFieldLocationWireframe(visible) {
@@ -508,6 +514,13 @@ function updateFieldCameraProjection() {
 
 function resetFieldCameraView() {
   if (!fieldCameraFit || !currentModel) return;
+  fieldViewState = createFieldViewState(fieldCameraFit.fullWidth, fieldCameraFit.fullHeight, getCanvasAspect());
+  restoreFieldCameraPose();
+  scheduleFrame();
+}
+
+function restoreFieldCameraPose() {
+  if (!fieldCameraFit || !currentModel) return;
   currentModel.scene.updateMatrixWorld(true);
   const fieldCamera = currentModel.scene.getObjectByProperty('isCamera', true);
   if (!fieldCamera?.isPerspectiveCamera) return;
@@ -519,11 +532,54 @@ function resetFieldCameraView() {
   camera.fov = fieldCameraFit.fov;
   camera.near = fieldCamera.near;
   camera.far = fieldCamera.far;
-  fieldViewState = createFieldViewState(fieldCameraFit.fullWidth, fieldCameraFit.fullHeight, getCanvasAspect());
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(orientation).normalize();
-  controls?.target.copy(position).addScaledVector(forward, 1000);
-  controls?.update();
+  camera.clearViewOffset();
+  camera.aspect = getCanvasAspect();
+  camera.updateProjectionMatrix();
   updateFieldCameraProjection();
+}
+
+function getFieldFlySpeed() {
+  if (!currentModel) return 1;
+  const walkmesh = currentModel.scene.getObjectByName('Walkmesh surfaces');
+  const bounds = new THREE.Box3().setFromObject(walkmesh || currentModel.scene, true);
+  if (bounds.isEmpty()) return 1;
+  const size = bounds.getSize(new THREE.Vector3());
+  return Math.max(Math.max(size.x, size.y, size.z) * 0.02, 0.5);
+}
+
+function setFieldFlyMode(enabled) {
+  if (!fieldCameraFit || !currentModel) return;
+  const nextMode = enabled ? 'fly' : 'field';
+  if (controlsMode === nextMode) return;
+
+  controls?.dispose();
+  controls = null;
+  controlsMode = nextMode;
+  flyKeys.clear();
+  flyDragging = false;
+  flyPointerId = null;
+  flyPointerButton = -1;
+  flyLookMoved = false;
+  fieldPan = null;
+  canvas.classList.remove('fly-dragging', 'field-panning', 'field-zooming');
+  canvas.classList.toggle('field-preview', !enabled);
+  canvas.title = enabled
+    ? 'Fly controls: drag to look; W/A/S/D to move; Q/E to descend and rise; Shift to move faster. Left-click or middle-click to return to the field camera.'
+    : 'Field controls: left-drag to zoom; middle-drag to pan; right-click to fly; double-click to reset the field camera.';
+
+  if (enabled) {
+    camera.clearViewOffset();
+    camera.aspect = getCanvasAspect();
+    camera.updateProjectionMatrix();
+    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    flyYaw = euler.y;
+    flyPitch = euler.x;
+    camera.rotation.order = 'YXZ';
+    camera.rotation.set(flyPitch, flyYaw, 0, 'YXZ');
+    flyMovementSpeed = getFieldFlySpeed();
+  } else {
+    restoreFieldCameraPose();
+  }
   scheduleFrame();
 }
 
@@ -540,31 +596,64 @@ function onFieldWheel(event) {
 }
 
 function onFieldPointerDown(event) {
-  if (controlsMode !== 'field' || !fieldViewState || event.button !== 0) return;
+  if (!fieldCameraFit || !currentModel) return;
+
+  if (controlsMode === 'fly') {
+    if (event.button === 1) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setFieldFlyMode(false);
+    }
+    return;
+  }
+  if (controlsMode !== 'field' || !fieldViewState) return;
+
+  if (event.button === 2) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    setFieldFlyMode(true);
+    beginFlyLook(event);
+    return;
+  }
+  if (event.button !== 0 && event.button !== 1) return;
+
+  const mode = event.button === 0 ? 'zoom' : 'pan';
   fieldPan = {
+    mode,
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
+    startZoom: fieldViewState.targetZoom,
     centerX: fieldViewState.centerX,
     centerY: fieldViewState.centerY,
   };
-  canvas.classList.add('field-panning');
+  canvas.classList.toggle('field-panning', mode === 'pan');
+  canvas.classList.toggle('field-zooming', mode === 'zoom');
   if (canvas.setPointerCapture)
     canvas.setPointerCapture(event.pointerId);
   event.preventDefault();
+  event.stopImmediatePropagation();
 }
 
 function onFieldPointerMove(event) {
   if (controlsMode !== 'field' || !fieldPan || event.pointerId !== fieldPan.pointerId || !fieldViewState) return;
   const rect = canvas.getBoundingClientRect();
   if (!(rect.width > 0 && rect.height > 0)) return;
-  const viewHeight = FF7_FIELD_VIEWPORT_HEIGHT / fieldViewState.zoom;
-  const viewWidth = viewHeight * (rect.width / rect.height);
   const deltaX = event.clientX - fieldPan.startX;
   const deltaY = event.clientY - fieldPan.startY;
-  fieldViewState.centerX = fieldPan.centerX - (deltaX / rect.width) * viewWidth;
-  fieldViewState.centerY = fieldPan.centerY - (deltaY / rect.height) * viewHeight;
-  applyFieldViewOffset(fieldViewState, rect.width / rect.height);
+  if (fieldPan.mode === 'zoom') {
+    fieldViewState.targetZoom = THREE.MathUtils.clamp(
+      fieldPan.startZoom * Math.exp(-deltaY * 0.005),
+      fieldViewState.minZoom,
+      fieldViewState.maxZoom
+    );
+  } else {
+    const viewHeight = FF7_FIELD_VIEWPORT_HEIGHT / fieldViewState.zoom;
+    const viewWidth = viewHeight * (rect.width / rect.height);
+    fieldViewState.centerX = fieldPan.centerX - (deltaX / rect.width) * viewWidth;
+    fieldViewState.centerY = fieldPan.centerY - (deltaY / rect.height) * viewHeight;
+    applyFieldViewOffset(fieldViewState, rect.width / rect.height);
+  }
   scheduleFrame();
   event.preventDefault();
 }
@@ -572,7 +661,7 @@ function onFieldPointerMove(event) {
 function onFieldPointerUp(event) {
   if (!fieldPan || event.pointerId !== fieldPan.pointerId) return;
   fieldPan = null;
-  canvas.classList.remove('field-panning');
+  canvas.classList.remove('field-panning', 'field-zooming');
   if (canvas.hasPointerCapture?.(event.pointerId))
     canvas.releasePointerCapture(event.pointerId);
 }
@@ -584,7 +673,7 @@ function onFieldDoubleClick(event) {
 }
 
 function onFieldContextMenu(event) {
-  if (controlsMode === 'field') event.preventDefault();
+  if (fieldCameraFit || controlsMode === 'fly') event.preventDefault();
 }
 
 function ensureRenderer(cameraMode = 'orbit') {
@@ -606,21 +695,11 @@ function ensureRenderer(cameraMode = 'orbit') {
   flyPointerId = null;
   canvas.classList.remove('fly-dragging', 'field-panning');
   canvas.classList.toggle('field-preview', controlsMode === 'field');
-  if (controlsMode === 'orbit' || controlsMode === 'field') {
+  if (controlsMode === 'orbit') {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = true;
-    if (controlsMode === 'field') {
-      controls.enableZoom = false;
-      controls.enablePan = false;
-      controls.enableRotate = true;
-      controls.mouseButtons = {
-        LEFT: null,
-        MIDDLE: THREE.MOUSE.DOLLY,
-        RIGHT: THREE.MOUSE.ROTATE,
-      };
-    }
   }
   controls?.addEventListener('change', scheduleFrame);
 }
@@ -804,7 +883,7 @@ function resize() {
   const height = canvas.clientHeight;
   if (width <= 0 || height <= 0) return;
   renderer.setSize(width, height, false);
-  if (fieldCameraFit) {
+  if (fieldCameraFit && controlsMode === 'field') {
     updateFieldCameraProjection();
   } else {
     camera.aspect = width / height;
@@ -882,12 +961,18 @@ function onFlyKeyUp(event) {
 }
 
 function onFlyPointerDown(event) {
-  if (controlsMode !== 'fly' || event.button !== 0) return;
+  if (controlsMode !== 'fly' || (event.button !== 0 && !(fieldCameraFit && event.button === 2))) return;
+  beginFlyLook(event);
+}
+
+function beginFlyLook(event) {
   flyDragging = true;
   flyPointerId = event.pointerId;
+  flyPointerButton = event.button;
+  flyLookMoved = false;
   flyLastPointer = { x: event.clientX, y: event.clientY };
   canvas.classList.add('fly-dragging');
-  canvas.setPointerCapture(event.pointerId);
+  canvas.setPointerCapture?.(event.pointerId);
   event.preventDefault();
 }
 
@@ -895,6 +980,7 @@ function onFlyPointerMove(event) {
   if (controlsMode !== 'fly' || !flyDragging || event.pointerId !== flyPointerId) return;
   const deltaX = event.clientX - flyLastPointer.x;
   const deltaY = event.clientY - flyLastPointer.y;
+  flyLookMoved ||= Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1;
   flyLastPointer = { x: event.clientX, y: event.clientY };
   flyYaw -= deltaX * 0.003375;
   flyPitch = THREE.MathUtils.clamp(flyPitch - deltaY * 0.003375, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
@@ -906,11 +992,15 @@ function onFlyPointerMove(event) {
 
 function onFlyPointerUp(event) {
   if (!flyDragging || event.pointerId !== flyPointerId) return;
+  const returnToFieldView = fieldCameraFit && flyPointerButton === 0 && !flyLookMoved;
   flyDragging = false;
   flyPointerId = null;
+  flyPointerButton = -1;
   canvas.classList.remove('fly-dragging');
   if (canvas.hasPointerCapture(event.pointerId))
     canvas.releasePointerCapture(event.pointerId);
+  if (returnToFieldView)
+    setFieldFlyMode(false);
 }
 
 function updateFlyControls(delta) {

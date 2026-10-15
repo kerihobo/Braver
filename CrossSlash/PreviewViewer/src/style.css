@@ -37,6 +37,7 @@ html, body, #viewer {
 #model-canvas.fly-dragging { cursor: none; }
 #model-canvas.field-preview { cursor: grab; touch-action: none; }
 #model-canvas.field-preview.field-panning { cursor: grabbing; }
+#model-canvas.field-preview.field-zooming { cursor: ns-resize; }
 
 #empty-state {
   position: absolute;
@@ -69,11 +70,34 @@ html, body, #viewer {
   pointer-events: none;
 }
 
-#pop-out-button {
+#viewer-actions {
   position: absolute;
   z-index: 2;
   top: 8px;
   right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#field-location-wireframe-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 0;
+  color: #e7edf3;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+#field-location-wireframe-toggle input {
+  margin: 0;
+  accent-color: #4b91d9;
+}
+
+#pop-out-button {
   display: none;
   width: 32px;
   min-height: 28px;

@@ -4,6 +4,8 @@ const emptyState = document.querySelector('#empty-state');
 const controlPanel = document.querySelector('#controls');
 const editLightsButton = document.querySelector('#edit-lights-button');
 const popOutButton = document.querySelector('#pop-out-button');
+const fieldLocationWireframeToggle = document.querySelector('#field-location-wireframe-toggle');
+const fieldLocationWireframeInput = document.querySelector('#field-location-wireframe-input');
 const fieldLightingRow = document.querySelector('#field-lighting-row');
 const fieldSearch = document.querySelector('#field-search');
 const fieldOptions = document.querySelector('#field-options');
@@ -129,8 +131,14 @@ window.chrome?.webview?.addEventListener('message', (event) => {
     return;
   }
 
+  if (message.type === 'field-location-wireframe-visibility') {
+    fieldLocationWireframeToggle.hidden = message.visible !== true;
+    return;
+  }
+
   if (message.type === 'field-location-wireframe') {
     fieldLocationWireframe = message.visible === true;
+    fieldLocationWireframeInput.checked = fieldLocationWireframe;
     viewerModule?.setFieldLocationWireframe(fieldLocationWireframe);
     return;
   }
@@ -176,7 +184,7 @@ window.chrome?.webview?.addEventListener('message', (event) => {
     document.querySelector('#model-canvas').title = flyMode
       ? 'Fly controls: drag to look; W/A/S/D to move; Q/E to descend and rise; Shift to move faster.'
       : fieldMode
-        ? 'Field controls: scroll to zoom; drag with the left button to pan; drag with the right button to orbit; double-click to reset.'
+        ? 'Field controls: left-drag to zoom; middle-drag to pan; right-click to fly; left-click or middle-click to return to 2D; double-click to reset.'
         : '';
     setEmptyState('Loading preview…');
     prepareViewer().then((module) => {
@@ -208,6 +216,11 @@ window.chrome?.webview?.addEventListener('message', (event) => {
 
 editLightsButton.addEventListener('click', () => postToHost({ type: 'edit-lights' }));
 popOutButton.addEventListener('click', () => postToHost({ type: 'pop-out' }));
+fieldLocationWireframeInput.addEventListener('change', () => {
+  fieldLocationWireframe = fieldLocationWireframeInput.checked;
+  viewerModule?.setFieldLocationWireframe(fieldLocationWireframe);
+  postToHost({ type: 'field-location-wireframe', visible: fieldLocationWireframe });
+});
 function getSelectedFieldLabel() {
   return availableFields.find((field) => field.id === selectedFieldId)?.label || selectedFieldId;
 }

@@ -60,7 +60,6 @@ namespace CrossSlash {
         private readonly ModelPreviewControl _preview;
         private readonly ModelPreviewWindowHost _previewWindowHost;
         private readonly DispatcherTimer _previewTimer;
-        private readonly CheckBox _wireframeToggle;
         private readonly RichTextBox _cameraDiagnostics;
         private readonly Border _cameraHelpOverlay;
         private string? _previewCode;
@@ -89,13 +88,6 @@ namespace CrossSlash {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = VerticalAlignment.Stretch,
             };
-            _wireframeToggle = new CheckBox {
-                Content = "Wireframe",
-                IsChecked = true,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            _wireframeToggle.Checked += (_, _) => _preview.SetFieldLocationWireframe(true);
-            _wireframeToggle.Unchecked += (_, _) => _preview.SetFieldLocationWireframe(false);
             _previewWindowHost = new ModelPreviewWindowHost(this, _preview);
             _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
             _previewTimer.Tick += (_, _) => {
@@ -120,24 +112,7 @@ namespace CrossSlash {
             left.Children.Add(_fieldList);
 
             var previewPage = new Grid { Margin = new Thickness(12, 10, 12, 0) };
-            previewPage.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            previewPage.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            var previewHeader = new Grid { Margin = new Thickness(0, 0, 0, 10) };
-            previewHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            previewHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var previewTitle = new TextBlock {
-                Text = "Preview · FF7 camera",
-                FontSize = 16,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = DesktopUi.TextPrimaryBrush,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            previewHeader.Children.Add(previewTitle);
-            Grid.SetColumn(_wireframeToggle, 1);
-            previewHeader.Children.Add(_wireframeToggle);
-            previewPage.Children.Add(previewHeader);
             var previewHost = new Grid { MinHeight = 280, ClipToBounds = true };
-            Grid.SetRow(previewHost, 1);
             previewHost.Children.Add(_preview);
             previewPage.Children.Add(previewHost);
 
@@ -200,6 +175,7 @@ namespace CrossSlash {
 
             DesktopUi.ConfigureWindow(this, content, width: 1120, height: 820, scrollContent: false);
             _preview.SetFieldLocationWireframe(true);
+            _preview.SetFieldLocationWireframeToggleVisible(true);
             if (_fieldList.Items.Count > 0)
                 _fieldList.SelectedIndex = 0;
             else
