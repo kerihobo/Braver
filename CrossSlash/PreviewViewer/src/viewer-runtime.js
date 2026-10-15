@@ -32,6 +32,14 @@ const loader = new GLTFLoader();
 const clock = new THREE.Clock();
 let renderer = null;
 let controls = null;
+let controlsMode = 'orbit';
+const flyKeys = new Set();
+let flyDragging = false;
+let flyPointerId = null;
+let flyLastPointer = { x: 0, y: 0 };
+let flyYaw = 0;
+let flyPitch = 0;
+let flyMovementSpeed = 1;
 let currentModel = null;
 let currentModelName = '';
 let mixer = null;
@@ -44,6 +52,9 @@ let viewerVisible = true;
 let requestId = 0;
 let lastTimelineUpdate = 0;
 let loadSequence = 0;
+let animationSequence = 0;
+let isLoadingModel = false;
+let pendingAnimation = null;
 
 function postToHost(payload) {
   window.chrome?.webview?.postMessage(payload);
@@ -101,6 +112,7 @@ function resetCurrentModel() {
 function createFieldLightingState(lighting) {
   const state = {
     uniforms: null,
+    dynamic: false,
     objectMatrix: new THREE.Matrix4(),
     objectNormalMatrix: new THREE.Matrix3(),
     ambientColor: new THREE.Color(),
@@ -119,6 +131,7 @@ function updateFieldLightingState(state, lighting) {
   const positionScale = lighting?.positionScale || 512;
   state.ambientColor.setHex(lighting?.ambientColor ?? 0x575455);
   state.ambientIntensity = lighting ? (lighting.ambientIntensity ?? 1) : 0;
+  state.dynamic = lighting?.dynamic === true;
 
   for (let index = 0; index < 3; index++) {
     const source = pointLights[index];
@@ -243,12 +256,17 @@ function makeLitMaterial(source, state) {
 function applyFieldPointLighting(root, lighting, convertMaterials = false) {
   const lightRoot = root.getObjectByName('root') || root;
   const hasFieldLighting = Array.isArray(lighting?.pointLights);
+  const dynamic = lighting?.dynamic === true;
+  root.updateMatrixWorld(true);
   defaultLights.forEach((light) => { light.visible = !hasFieldLighting; });
 
   root.traverse((object) => {
     const states = object.userData.fieldLightingStates;
-    if (Array.isArray(states))
+    if (Array.isArray(states)) {
       states.forEach((state) => updateFieldLightingState(state, lighting));
+      if (!dynamic)
+        object.userData.refreshFieldLightingTransforms?.();
+    }
   });
 
   if (!convertMaterials) return;
@@ -265,23 +283,34 @@ function applyFieldPointLighting(root, lighting, convertMaterials = false) {
       : convert(object.material);
     object.userData.fieldLightingStates = states;
 
+    const refreshTransforms = () => {
+      lightRoot.updateWorldMatrix(true, false);
+      object.updateWorldMatrix(true, false);
+      inverseRoot.copy(lightRoot.matrixWorld).invert();
+      for (const state of states) {
+        state.objectMatrix.multiplyMatrices(inverseRoot, object.matrixWorld);
+        state.objectNormalMatrix.getNormalMatrix(state.objectMatrix);
+      }
+    };
+    object.userData.refreshFieldLightingTransforms = refreshTransforms;
+
     const previousOnBeforeRender = object.onBeforeRender;
     const inverseRoot = new THREE.Matrix4();
     object.onBeforeRender = function (renderer, scene, camera, geometry, material, group) {
       previousOnBeforeRender.call(this, renderer, scene, camera, geometry, material, group);
-      lightRoot.updateWorldMatrix(true, false);
-      this.updateWorldMatrix(true, false);
-      inverseRoot.copy(lightRoot.matrixWorld).invert();
-      for (const state of states) {
-        state.objectMatrix.multiplyMatrices(inverseRoot, this.matrixWorld);
-        state.objectNormalMatrix.getNormalMatrix(state.objectMatrix);
-      }
+      if (states.some((state) => state.dynamic))
+        refreshTransforms();
     };
+    if (dynamic)
+      refreshTransforms();
   });
 }
 
 export function clearModel(message) {
   loadSequence++;
+  animationSequence++;
+  isLoadingModel = false;
+  pendingAnimation = null;
   activeLighting = null;
   resetCurrentModel();
   setEmptyState(message || 'Choose a model to preview');
@@ -295,12 +324,23 @@ export function setLighting(lighting) {
 }
 
 function fitCamera(root, zoomFactor = 1.2) {
+  camera.fov = controlsMode === 'fly' ? 50 : 42;
+  camera.updateProjectionMatrix();
   root.updateMatrixWorld(true);
   // Include all child meshes and their current animated pose when finding the orbit center.
   const bounds = new THREE.Box3().setFromObject(root, true);
   if (bounds.isEmpty()) {
     camera.position.set(0, 0, 5);
-    controls.target.set(0, 0, 0);
+    camera.lookAt(0, 0, 0);
+    if (controlsMode === 'orbit') {
+      controls?.target.set(0, 0, 0);
+    } else {
+      const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+      flyYaw = euler.y;
+      flyPitch = euler.x;
+      camera.rotation.order = 'YXZ';
+      camera.rotation.set(flyPitch, flyYaw, 0, 'YXZ');
+    }
     return;
   }
 
@@ -313,25 +353,47 @@ function fitCamera(root, zoomFactor = 1.2) {
   camera.near = Math.max(largest / 10000, 0.001);
   camera.far = Math.max(largest * 100, 1000);
   camera.updateProjectionMatrix();
-  controls.target.copy(center);
-  controls.minDistance = Math.max(largest / 1000, 0.01);
-  controls.maxDistance = largest * 30;
-  controls.update();
+  camera.lookAt(center);
+  if (controlsMode === 'orbit') {
+    controls.target.copy(center);
+    controls.minDistance = Math.max(largest / 1000, 0.01);
+    controls.maxDistance = largest * 30;
+    controls.update();
+  } else {
+    flyMovementSpeed = Math.max(largest * 0.25, 0.5);
+    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    flyYaw = euler.y;
+    flyPitch = euler.x;
+    camera.rotation.order = 'YXZ';
+    camera.rotation.set(flyPitch, flyYaw, 0, 'YXZ');
+  }
 }
 
-function ensureRenderer() {
-  if (renderer) return;
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
-  renderer.setPixelRatio(1);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.NoToneMapping;
+function ensureRenderer(cameraMode = 'orbit') {
+  if (!renderer) {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
+    renderer.setPixelRatio(1);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
+    resize();
+  }
 
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.screenSpacePanning = true;
-  controls.addEventListener('change', scheduleFrame);
-  resize();
+  const requestedMode = cameraMode === 'fly' ? 'fly' : 'orbit';
+  if (controls && controlsMode === requestedMode) return;
+  controls?.dispose();
+  controls = null;
+  controlsMode = requestedMode;
+  flyKeys.clear();
+  flyDragging = false;
+  flyPointerId = null;
+  canvas.classList.remove('fly-dragging');
+  if (controlsMode === 'orbit') {
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.screenSpacePanning = true;
+  }
+  controls?.addEventListener('change', scheduleFrame);
 }
 
 function setClip(index) {
@@ -358,8 +420,11 @@ function updateTimeLabel(time) {
   timeLabel.textContent = `${displayed.toFixed(2)} / ${duration.toFixed(2)} s`;
 }
 
-export function loadModel(base64, name, lighting = null, cameraZoom = 1.2) {
+export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, cameraMode = 'orbit') {
   const sequence = ++loadSequence;
+  animationSequence++;
+  isLoadingModel = true;
+  pendingAnimation = null;
   activeLighting = lighting;
   setEmptyState('Loading preview…');
   const binary = atob(base64);
@@ -372,7 +437,7 @@ export function loadModel(base64, name, lighting = null, cameraZoom = 1.2) {
       return;
     }
     resetCurrentModel();
-    ensureRenderer();
+    ensureRenderer(cameraMode);
     currentModel = gltf;
     gltf.scene.traverse((object) => {
       if (object.isSkinnedMesh)
@@ -393,16 +458,66 @@ export function loadModel(base64, name, lighting = null, cameraZoom = 1.2) {
       isPlaying = true;
       setClip(0);
     }
+    refreshStaticLightingTransforms(gltf.scene);
+    isLoadingModel = false;
     fitCamera(gltf.scene, cameraZoom);
     setEmptyState('', false);
     scheduleFrame();
     postToHost({ type: 'preview-loaded' });
+    if (pendingAnimation) {
+      const nextAnimation = pendingAnimation;
+      pendingAnimation = null;
+      loadAnimation(nextAnimation.base64, nextAnimation.name);
+    }
   }, (error) => {
     if (sequence !== loadSequence) return;
+    isLoadingModel = false;
+    pendingAnimation = null;
     resetCurrentModel();
     const detail = error?.message || 'The GLB could not be loaded.';
     setEmptyState(`Preview failed: ${detail}`);
     postToHost({ type: 'preview-error', message: detail });
+  });
+}
+
+function refreshStaticLightingTransforms(root) {
+  root.traverse((object) => {
+    if (Array.isArray(object.userData.fieldLightingStates) &&
+        object.userData.fieldLightingStates.every((state) => !state.dynamic))
+      object.userData.refreshFieldLightingTransforms?.();
+  });
+}
+
+export function loadAnimation(base64, name) {
+  if (isLoadingModel || !currentModel || !mixer) {
+    pendingAnimation = { base64, name };
+    return;
+  }
+
+  const sequence = ++animationSequence;
+  const binary = atob(base64);
+  const data = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) data[i] = binary.charCodeAt(i);
+
+  loader.parse(data.buffer, '', (gltf) => {
+    if (sequence !== animationSequence || isLoadingModel || !currentModel || !mixer) {
+      disposeObject(gltf.scene);
+      return;
+    }
+    const clip = gltf.animations[0];
+    if (!clip) {
+      disposeObject(gltf.scene);
+      console.warn(`No animation clip was found in ${name || 'the selected animation'}.`);
+      return;
+    }
+    clip.name = name || clip.name || 'Animation';
+    currentModel.animations = [clip];
+    disposeObject(gltf.scene);
+    setClip(0);
+    postToHost({ type: 'preview-animation-loaded' });
+  }, (error) => {
+    if (sequence === animationSequence)
+      console.error('Could not load animation preview:', error);
   });
 }
 
@@ -486,17 +601,98 @@ function animate() {
       updateTimeLabel(currentAction.time);
     }
   }
-  const controlsMoving = controls?.update() === true;
+  let controlsMoving = false;
+  if (controlsMode === 'fly')
+    controlsMoving = updateFlyControls(delta);
+  else
+    controlsMoving = controls?.update() === true;
   renderer.render(scene, camera);
   if (isPlaying || controlsMoving)
     scheduleFrame();
 }
+
+function onFlyKeyDown(event) {
+  if (controlsMode !== 'fly' || event.altKey || event.ctrlKey || event.metaKey)
+    return;
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight'].includes(event.code)) {
+    flyKeys.add(event.code);
+    event.preventDefault();
+    scheduleFrame();
+  }
+}
+
+function onFlyKeyUp(event) {
+  if (controlsMode !== 'fly') return;
+  flyKeys.delete(event.code);
+  scheduleFrame();
+}
+
+function onFlyPointerDown(event) {
+  if (controlsMode !== 'fly' || event.button !== 0) return;
+  flyDragging = true;
+  flyPointerId = event.pointerId;
+  flyLastPointer = { x: event.clientX, y: event.clientY };
+  canvas.classList.add('fly-dragging');
+  canvas.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function onFlyPointerMove(event) {
+  if (controlsMode !== 'fly' || !flyDragging || event.pointerId !== flyPointerId) return;
+  const deltaX = event.clientX - flyLastPointer.x;
+  const deltaY = event.clientY - flyLastPointer.y;
+  flyLastPointer = { x: event.clientX, y: event.clientY };
+  flyYaw -= deltaX * 0.003375;
+  flyPitch = THREE.MathUtils.clamp(flyPitch - deltaY * 0.003375, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.set(flyPitch, flyYaw, 0, 'YXZ');
+  scheduleFrame();
+  event.preventDefault();
+}
+
+function onFlyPointerUp(event) {
+  if (!flyDragging || event.pointerId !== flyPointerId) return;
+  flyDragging = false;
+  flyPointerId = null;
+  canvas.classList.remove('fly-dragging');
+  if (canvas.hasPointerCapture(event.pointerId))
+    canvas.releasePointerCapture(event.pointerId);
+}
+
+function updateFlyControls(delta) {
+  const forward = Number(flyKeys.has('KeyW')) - Number(flyKeys.has('KeyS'));
+  const right = Number(flyKeys.has('KeyD')) - Number(flyKeys.has('KeyA'));
+  const vertical = (Number(flyKeys.has('KeyE')) - Number(flyKeys.has('KeyQ'))) * 0.35;
+  if (forward === 0 && right === 0 && vertical === 0)
+    return false;
+
+  const directionLength = Math.hypot(forward, right, vertical) || 1;
+  const fast = flyKeys.has('ShiftLeft') || flyKeys.has('ShiftRight') ? 3 : 1;
+  const distance = flyMovementSpeed * fast * delta / directionLength;
+  camera.translateZ(-forward * distance);
+  camera.translateX(right * distance);
+  camera.translateY(vertical * distance);
+  return true;
+}
+
+window.addEventListener('keydown', onFlyKeyDown);
+window.addEventListener('keyup', onFlyKeyUp);
+canvas.addEventListener('pointerdown', onFlyPointerDown);
+canvas.addEventListener('pointermove', onFlyPointerMove);
+canvas.addEventListener('pointerup', onFlyPointerUp);
+canvas.addEventListener('pointercancel', onFlyPointerUp);
 
 resize();
 
 window.addEventListener('beforeunload', () => {
   cancelAnimationFrame(requestId);
   resizeObserver.disconnect();
+  window.removeEventListener('keydown', onFlyKeyDown);
+  window.removeEventListener('keyup', onFlyKeyUp);
+  canvas.removeEventListener('pointerdown', onFlyPointerDown);
+  canvas.removeEventListener('pointermove', onFlyPointerMove);
+  canvas.removeEventListener('pointerup', onFlyPointerUp);
+  canvas.removeEventListener('pointercancel', onFlyPointerUp);
   controls?.dispose();
   renderer?.dispose();
 });

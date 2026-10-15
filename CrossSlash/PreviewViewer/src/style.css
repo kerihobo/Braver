@@ -7,6 +7,9 @@
 
 * { box-sizing: border-box; }
 
+/* Preserve HTML's hidden attribute even on elements with explicit display rules. */
+[hidden] { display: none !important; }
+
 html, body, #viewer {
   width: 100%;
   height: 100%;
@@ -31,6 +34,8 @@ html, body, #viewer {
   outline: none;
 }
 
+#model-canvas.fly-dragging { cursor: none; }
+
 #empty-state {
   position: absolute;
   inset: 0 0 68px;
@@ -52,7 +57,7 @@ html, body, #viewer {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-width: calc(100% - 24px);
+  max-width: calc(100% - 64px);
   overflow: hidden;
   padding: 0;
   color: #e7edf3;
@@ -60,6 +65,17 @@ html, body, #viewer {
   white-space: normal;
   text-shadow: 0 1px 3px #000, 0 0 5px #000;
   pointer-events: none;
+}
+
+#pop-out-button {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 8px;
+  display: none;
+  width: 32px;
+  min-height: 28px;
+  padding: 2px;
 }
 
 #model-label span {
@@ -89,6 +105,73 @@ html, body, #viewer {
   gap: 7px;
   min-width: 0;
 }
+
+#edit-lights-button {
+  display: none;
+  margin-left: auto;
+}
+
+#field-lighting-row select,
+#field-lighting-row input {
+  flex: 1;
+  width: 50%;
+  min-width: 0;
+  min-height: 28px;
+  border: 1px solid #506171;
+  border-radius: 3px;
+  background: #222d38;
+  color: #e7edf3;
+  padding: 3px 7px;
+}
+
+.searchable-dropdown {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.searchable-dropdown input {
+  border-radius: 3px 0 0 3px;
+}
+
+.searchable-dropdown .dropdown-toggle {
+  width: 30px;
+  min-width: 30px;
+  padding: 2px;
+  border-left: 0;
+  border-radius: 0 3px 3px 0;
+}
+
+.dropdown-options {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  bottom: calc(100% + 3px);
+  left: 0;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #506171;
+  border-radius: 3px;
+  background: #222d38;
+  box-shadow: 0 4px 12px #0008;
+}
+
+.dropdown-options[hidden] { display: none; }
+
+.dropdown-options button {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdown-options button[aria-selected="true"] { background: #344352; }
 
 select, button, input { font: inherit; }
 

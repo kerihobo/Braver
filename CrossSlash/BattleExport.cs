@@ -47,15 +47,15 @@ namespace CrossSlash {
     public class BattleExportWindow : Window {
         private DataSource _source;
         private bool _magicModels;
-        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations;
+        private CheckBox _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations, _chkPrefixAnimations;
         private readonly WrapPanel _exportOptions;
         private StackPanel? _optionsPanel;
         private readonly ModelPreviewControl _modelPreview;
+        private readonly ModelPreviewWindowHost _previewWindowHost;
         private readonly DispatcherTimer _previewTimer;
-        private Grid? _previewHost;
         private Grid? _battleModelPreviewHost, _battlefieldPreviewHost;
         private bool _previewBattlefield;
-        private readonly TextBox _txtModelSearch, _txtScale, _txtBattlefield;
+        private readonly TextBox _txtModelSearch, _txtScale, _txtBattlefield, _txtBattlefieldSearch;
         private readonly ListBox _lstModels, _lstBattlefields;
         private readonly AnimationPickerState _battleAnimations;
         private AnimationPickerState? _activeAnimations;
@@ -70,12 +70,16 @@ namespace CrossSlash {
             _source = source;
             _magicModels = magicModels;
             _modelPreview = new ModelPreviewControl { Height = 340 };
+            _previewWindowHost = new ModelPreviewWindowHost(this, _modelPreview);
             _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
             _previewTimer.Tick += (_, _) => {
                 _previewTimer.Stop();
                 RefreshPreview();
             };
-            Closed += (_, _) => _previewTimer.Stop();
+            Closed += (_, _) => {
+                _previewTimer.Stop();
+                _previewWindowHost.Close();
+            };
             _modelCodes = magicModels
                 ? ModelBatchDiscovery.FindMagicModels(source)
                 : ModelBatchDiscovery.FindBattleModels(source);
@@ -87,6 +91,7 @@ namespace CrossSlash {
             _txtModelSearch.TextChanged += (_, _) => _modelView.Refresh();
             _txtScale = DesktopUi.CreateTextBox(magicModels ? "0.1" : "1");
             _txtBattlefield = DesktopUi.CreateTextBox();
+            _txtBattlefieldSearch = DesktopUi.CreateSearchTextBox("Search battlefields");
             _lstModels = new ListBox {
                 ItemsSource = _modelView,
                 MinHeight = 150,
@@ -106,6 +111,10 @@ namespace CrossSlash {
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4),
             };
+            var battlefieldView = CollectionViewSource.GetDefaultView(_battlefieldCodes);
+            battlefieldView.Filter = item => item is string code &&
+                (string.IsNullOrWhiteSpace(_txtBattlefieldSearch.Text) || code.Contains(_txtBattlefieldSearch.Text, StringComparison.OrdinalIgnoreCase));
+            _txtBattlefieldSearch.TextChanged += (_, _) => battlefieldView.Refresh();
             _lstBattlefields.SelectionChanged += (_, _) => {
                 if (_lstBattlefields.SelectedItem is string code)
                     _txtBattlefield.Text = code;
@@ -118,6 +127,13 @@ namespace CrossSlash {
             _chkSwapWinding = new CheckBox { Content = "Swap triangle winding", Margin = new Thickness(0, 0, 18, 8) };
             _chkBakeColours = new CheckBox { Content = "Bake vertex colours to texture", Margin = new Thickness(0, 0, 18, 8) };
             _chkEmbedAnimations = new CheckBox { Content = "Embed animations", IsChecked = true, Margin = new Thickness(0, 0, 18, 8) };
+            _chkPrefixAnimations = new CheckBox {
+                Content = "Prefix animation names and files with model name",
+                IsChecked = PreferencesStore.Load().PrefixAnimationNamesWithModelName,
+                Margin = new Thickness(0, 0, 18, 8),
+            };
+            _chkPrefixAnimations.Checked += (_, _) => PreferencesStore.RememberAnimationNamePrefix(true);
+            _chkPrefixAnimations.Unchecked += (_, _) => PreferencesStore.RememberAnimationNamePrefix(false);
             _chkSRGB.Checked += (_, _) => SchedulePreview();
             _chkSRGB.Unchecked += (_, _) => SchedulePreview();
             _chkSwapWinding.Checked += (_, _) => SchedulePreview();
@@ -127,7 +143,7 @@ namespace CrossSlash {
             _txtScale.TextChanged += (_, _) => SchedulePreview();
             _exportOptions = new WrapPanel {
                 Margin = new Thickness(0, 4, 0, 16),
-                Children = { DesktopUi.CreateScaleOption(_txtScale), _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations },
+                Children = { DesktopUi.CreateScaleOption(_txtScale), _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations, _chkPrefixAnimations },
             };
 
             var content = new StackPanel();
@@ -176,7 +192,7 @@ namespace CrossSlash {
             columns.Children.Add(animationColumn);
 
             var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-            previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
+            previewColumn.Children.Add(CreatePreviewHeader());
             var previewHost = new Grid { Height = 340 };
             previewColumn.Children.Add(previewHost);
             Grid.SetColumn(previewColumn, 2);
@@ -212,12 +228,12 @@ namespace CrossSlash {
             columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.64, GridUnitType.Star) });
             var modelColumn = new StackPanel { Margin = new Thickness(0, 0, 12, 0) };
             modelColumn.Children.Add(DesktopUi.CreateSectionTitle($"Battlefields ({_battlefieldCodes.Count:N0})"));
+            modelColumn.Children.Add(_txtBattlefieldSearch);
             modelColumn.Children.Add(_lstBattlefields);
-            modelColumn.Children.Add(DesktopUi.CreateFormRow("Location code", _txtBattlefield));
             columns.Children.Add(modelColumn);
 
             var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-            previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
+            previewColumn.Children.Add(CreatePreviewHeader());
             var previewHost = new Grid { Height = 340 };
             previewColumn.Children.Add(previewHost);
             Grid.SetColumn(previewColumn, 1);
@@ -283,7 +299,7 @@ namespace CrossSlash {
             columns.Children.Add(animationColumn);
 
             var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-            previewColumn.Children.Add(DesktopUi.CreateSectionTitle("Preview"));
+            previewColumn.Children.Add(CreatePreviewHeader());
             var previewHost = new Grid { Height = 340 };
             previewColumn.Children.Add(previewHost);
             Grid.SetColumn(previewColumn, 2);
@@ -358,18 +374,25 @@ namespace CrossSlash {
         private sealed record MagicModelTabState(string Group, List<string> ModelCodes, ListBox ModelList, AnimationPickerState Animations, StackPanel Panel, Grid PreviewHost);
 
         private void MovePreviewTo(Grid host) {
-            if (ReferenceEquals(_previewHost, host))
-                return;
-            if (_previewHost != null)
-                _previewHost.Children.Remove(_modelPreview);
-            host.Children.Add(_modelPreview);
-            _previewHost = host;
+            _previewWindowHost.AttachTo(host);
+        }
+
+        private UIElement CreatePreviewHeader() {
+            var title = DesktopUi.CreateSectionTitle("Preview");
+            title.Margin = new Thickness(0);
+            title.VerticalAlignment = VerticalAlignment.Center;
+            title.Height = 24;
+            title.Margin = new Thickness(0, 0, 0, 12);
+            return title;
         }
 
         private void MoveExportOptionsToSelectedTab(TabControl tabs) {
             if (tabs.SelectedItem is TabItem { Content: StackPanel panel } tab) {
                 _previewBattlefield = Equals(tab.Header, "Battlefields");
                 _chkEmbedAnimations.Visibility = _previewBattlefield
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+                _chkPrefixAnimations.Visibility = _previewBattlefield
                     ? Visibility.Collapsed
                     : Visibility.Visible;
                 if (_previewBattlefield && _battlefieldPreviewHost != null) {
@@ -577,7 +600,7 @@ namespace CrossSlash {
                 DataSource battlefieldSource = _source;
                 BattleModelOptions battlefieldOptions = GetOptions(battlefieldScale);
                 _modelPreview.ShowModel(() => new BattleModel(battlefieldSource, battlefieldOptions)
-                    .BuildSceneFromBattleLocation(locationCode), locationCode, cameraZoom: 1.4f);
+                    .BuildSceneFromBattleLocation(locationCode), locationCode, cameraZoom: 2.8f, cameraMode: "fly", hideControls: true);
                 return;
             }
 
@@ -630,8 +653,10 @@ namespace CrossSlash {
                 var options = GetOptions(scale);
                 var exporter = new BattleModel(_source, options);
                 bool embedAnimations = _chkEmbedAnimations.IsChecked == true;
+                bool prefixAnimations = _chkPrefixAnimations.IsChecked == true;
                 var animationIndices = embedAnimations ? GetSelectedAnimationIndices(_activeAnimations) : null;
                 var model = exporter.BuildSceneAuto(modelCode, includeAnimations: embedAnimations, animationIndices: animationIndices);
+                AnimationExportNaming.PrefixAnimationNames(model, modelCode, prefixAnimations);
                 model.SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
                 string animationSummary = _chkEmbedAnimations.IsChecked == true
@@ -672,6 +697,7 @@ namespace CrossSlash {
                 DataSource source = _source;
                 BattleModelOptions options = GetOptions(scale);
                 bool embedAnimations = _chkEmbedAnimations.IsChecked == true;
+                bool prefixAnimations = _chkPrefixAnimations.IsChecked == true;
                 IReadOnlyCollection<int>? animationIndices = embedAnimations ? GetSelectedAnimationIndices(_activeAnimations) : null;
                 string result = await BatchExportRunner.RunAsync(
                     this,
@@ -690,6 +716,7 @@ namespace CrossSlash {
                             try {
                                 var exporter = new BattleModel(source, options);
                                 var model = exporter.BuildSceneAuto(code, includeAnimations: embedAnimations, animationIndices: animationIndices);
+                                AnimationExportNaming.PrefixAnimationNames(model, code, prefixAnimations);
                                 model.SaveGLB(Path.Combine(outputDirectory, code + ".glb"));
                                 animationCount += model.LogicalAnimations.Count;
                                 exported++;
@@ -833,6 +860,7 @@ namespace CrossSlash {
 
                 DataSource source = _source;
                 BattleModelOptions options = GetOptions(scale);
+                bool prefixAnimations = _chkPrefixAnimations.IsChecked == true;
                 string result = await BatchExportRunner.RunAsync(
                     this,
                     $"Exporting {group.ToLowerInvariant()} animations",
@@ -850,7 +878,8 @@ namespace CrossSlash {
                             try {
                                 var exporter = new BattleModel(source, options);
                                 var model = exporter.BuildSceneAuto(code, includeMeshes: false, includeAnimations: true);
-                                string outputFile = Path.Combine(outputDirectory, code, "Animations.glb");
+                                AnimationExportNaming.PrefixAnimationNames(model, code, prefixAnimations);
+                                string outputFile = Path.Combine(outputDirectory, code, AnimationExportNaming.GetAnimationFileName(code, prefixAnimations));
                                 Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
                                 model.SaveGLB(outputFile);
                                 animationCount += model.LogicalAnimations.Count;

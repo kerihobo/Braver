@@ -195,8 +195,8 @@ namespace Ficedula.FF7.Exporters {
                 _bakedMaterial.GetChannel(KnownChannel.BaseColor).Texture.WithSampler(
                     TextureWrapMode.CLAMP_TO_EDGE,
                     TextureWrapMode.CLAMP_TO_EDGE,
-                    TextureMipMapFilter.LINEAR,
-                    TextureInterpolationFilter.LINEAR
+                    TextureMipMapFilter.NEAREST,
+                    TextureInterpolationFilter.NEAREST
                 );
             }
         }
@@ -300,15 +300,38 @@ namespace Ficedula.FF7.Exporters {
         protected Dictionary<TexFile, MaterialBuilder> ConvertTextures(IEnumerable<TexFile> texs) {
             Dictionary<TexFile, MaterialBuilder> materials = new();
             foreach (var texture in texs) {
-                byte[] data = texture
-                    .ToBitmap(0)
+                var bitmap = texture.ToBitmap(0);
+                bool hasTransparent = false;
+                bool hasPartialAlpha = false;
+                for (int y = 0; y < bitmap.Height && !hasPartialAlpha; y++) {
+                    for (int x = 0; x < bitmap.Width; x++) {
+                        byte alpha = bitmap.GetPixel(x, y).Alpha;
+                        hasTransparent |= alpha == 0;
+                        if (alpha != 0 && alpha != byte.MaxValue) {
+                            hasPartialAlpha = true;
+                            break;
+                        }
+                    }
+                }
+                var alphaMode = hasPartialAlpha
+                    ? SharpGLTF.Materials.AlphaMode.BLEND
+                    : hasTransparent
+                        ? SharpGLTF.Materials.AlphaMode.MASK
+                        : SharpGLTF.Materials.AlphaMode.OPAQUE;
+                byte[] data = bitmap
                     .Encode(SkiaSharp.SKEncodedImageFormat.Png, 100)
                     .ToArray();
                 var mat = new MaterialBuilder("Mat" + materials.Count)
                     .WithDoubleSide(false)
                     .WithUnlitShader()
-                    .WithAlpha(SharpGLTF.Materials.AlphaMode.BLEND)
+                    .WithAlpha(alphaMode)
                     .WithChannelImage(KnownChannel.BaseColor, new SharpGLTF.Memory.MemoryImage(data));
+                mat.GetChannel(KnownChannel.BaseColor).Texture.WithSampler(
+                    TextureWrapMode.REPEAT,
+                    TextureWrapMode.REPEAT,
+                    TextureMipMapFilter.NEAREST,
+                    TextureInterpolationFilter.NEAREST
+                );
                 //.WithChannelImage(KnownChannel.Diffuse, new SharpGLTF.Memory.MemoryImage(tex));
                 materials[texture] = mat;
             }

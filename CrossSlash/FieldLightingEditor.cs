@@ -15,6 +15,7 @@ namespace CrossSlash {
         private readonly FieldPreviewLightingSettings _initialSettings;
         private readonly Action<FieldPreviewLightingSettings> _onUpdate;
         private readonly TextBox _ambientColor;
+        private readonly CheckBox _dynamicLighting;
         private readonly List<(TextBox Color, TextBox X, TextBox Y, TextBox Z)> _pointLightInputs = new();
         private readonly Dictionary<TextBox, int> _lastValidColors = new();
 
@@ -33,6 +34,19 @@ namespace CrossSlash {
             Grid.SetColumn(ambientEditor, 1);
             globalRow.Children.Add(ambientEditor);
             content.Children.Add(globalRow);
+
+            var refreshRow = new Grid { Margin = new Thickness(0, 0, 0, 16) };
+            refreshRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            _dynamicLighting = new CheckBox {
+                Content = "Refresh every frame",
+                IsChecked = settings.DynamicLighting,
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "On: refresh field lighting every frame (PC behavior). Off: refresh once when the scene loads (original PSX behavior).",
+            };
+            _dynamicLighting.Checked += (_, _) => UpdatePreview();
+            _dynamicLighting.Unchecked += (_, _) => UpdatePreview();
+            refreshRow.Children.Add(_dynamicLighting);
+            content.Children.Add(refreshRow);
 
             content.Children.Add(DesktopUi.CreateSectionTitle("Point lights"));
             var header = CreateLightGrid();
@@ -82,13 +96,13 @@ namespace CrossSlash {
 
             var reset = DesktopUi.CreateButton("Reset");
             reset.Click += (_, _) => LoadValues(_initialSettings);
-            reset.Width = 72;
-            reset.Height = 32;
+            reset.Width = 84;
+            reset.Height = 40;
             reset.Margin = new Thickness(0, 0, 8, 0);
             var close = DesktopUi.CreateButton("Close");
             close.Click += (_, _) => Close();
-            close.Width = 72;
-            close.Height = 32;
+            close.Width = 84;
+            close.Height = 40;
             close.Margin = new Thickness(0);
             content.Children.Add(new StackPanel {
                 Orientation = Orientation.Horizontal,
@@ -228,6 +242,7 @@ namespace CrossSlash {
 
         private void LoadValues(FieldPreviewLightingSettings settings) {
             _ambientColor.Text = ColorText(settings.AmbientColor);
+            _dynamicLighting.IsChecked = settings.DynamicLighting;
             for (int i = 0; i < _pointLightInputs.Count; i++) {
                 FieldPreviewPointLight light = settings.PointLights[i];
                 var inputs = _pointLightInputs[i];
@@ -252,6 +267,7 @@ namespace CrossSlash {
 
             var updated = _initialSettings.Clone();
             updated.AmbientColor = ambientColor;
+            updated.DynamicLighting = _dynamicLighting.IsChecked == true;
             updated.PointLights.Clear();
             for (int i = 0; i < _pointLightInputs.Count; i++) {
                 var inputs = _pointLightInputs[i];

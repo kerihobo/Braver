@@ -17,11 +17,21 @@ namespace CrossSlash {
         private readonly TextBlock _status;
         private readonly SemaphoreSlim _buildGate = new(1, 1);
         private string? _pendingMessage;
+        private string? _pendingAnimationMessage;
         private string? _pendingLightingMessage;
+        private string? _pendingFieldLightingMessage;
+        private string? _lastViewerMessage;
+        private string? _lastAnimationMessage;
+        private string? _lastLightingMessage;
+        private string? _lastFieldLightingMessage;
+        private Action? _editLightsAction;
         private bool _initializationStarted;
         private bool _pageReady;
         private bool _viewerPreparationPending;
         private long _modelRequest;
+
+        public event Action<string>? ViewerMessageProduced;
+        public event Action<string, string?>? ViewerActionRequested;
 
         public ModelPreviewControl() {
             _webView = new WebView2 {
@@ -45,7 +55,6 @@ namespace CrossSlash {
             };
             content.Children.Add(_webView);
             content.Children.Add(_status);
-
             Content = new Border {
                 Background = DesktopUi.InputBackgroundBrush,
                 BorderBrush = DesktopUi.ControlBorderBrush,
@@ -57,26 +66,102 @@ namespace CrossSlash {
             Loaded += InitializeWebView;
         }
 
-        public void ShowModel(Func<ModelRoot> buildModel, string name, object? lighting = null, float cameraZoom = 1.2f) {
+        public void ShowModel(Func<ModelRoot> buildModel, string name, object? lighting = null, float cameraZoom = 1.2f, string cameraMode = "orbit", bool hideControls = false) {
             long request = Interlocked.Increment(ref _modelRequest);
+            Interlocked.Increment(ref _animationRequest);
+            _lastAnimationMessage = null;
+            _pendingAnimationMessage = null;
             _pendingMessage = null;
             _status.Text = $"Loading {name} preview…";
             _status.Visibility = Visibility.Visible;
             RequestViewerPreparation();
-            _ = PrepareModelPreviewAsync(buildModel, name, lighting, cameraZoom, request);
+            _ = PrepareModelPreviewAsync(buildModel, name, lighting, cameraZoom, cameraMode, hideControls, request);
+        }
+
+        private long _animationRequest;
+
+        public void ShowAnimation(Func<ModelRoot> buildModel, string name) {
+            long modelRequest = Interlocked.Read(ref _modelRequest);
+            long animationRequest = Interlocked.Increment(ref _animationRequest);
+            _ = PrepareAnimationPreviewAsync(buildModel, name, modelRequest, animationRequest);
         }
 
         public void PrepareViewer() => RequestViewerPreparation();
 
+        public void SetPopOutAction(Action? action) {
+            _popOutAction = action;
+            SendPopOutVisibility();
+        }
+
+        private Action? _popOutAction;
+
+        public void CopyViewerStateTo(ModelPreviewControl target) {
+            target.SetEditLightsAction(_editLightsAction);
+            if (_lastViewerMessage != null)
+                target.ReceiveViewerMessage(_lastViewerMessage);
+            if (_lastFieldLightingMessage != null)
+                target.ReceiveViewerMessage(_lastFieldLightingMessage);
+            if (_lastLightingMessage != null)
+                target.ReceiveViewerMessage(_lastLightingMessage);
+            if (_lastAnimationMessage != null)
+                target.ReceiveViewerMessage(_lastAnimationMessage);
+        }
+
+        public void SetEditLightsAction(Action? action) {
+            _editLightsAction = action;
+            if (_pageReady && _webView.CoreWebView2 != null)
+                _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {
+                    type = "edit-lights-visibility",
+                    visible = action != null,
+                }));
+        }
+
+        public void SetFieldLightingOptions(object options) {
+            string message = JsonSerializer.Serialize(new { type = "field-lighting-options", options });
+            _lastFieldLightingMessage = message;
+            _pendingFieldLightingMessage = message;
+            ViewerMessageProduced?.Invoke(message);
+            SendPendingFieldLightingMessage();
+        }
+
+        public void ReceiveViewerAction(string action, string? value) => ViewerActionRequested?.Invoke(action, value);
+
+        public void ReceiveViewerMessage(string message) {
+            using JsonDocument document = JsonDocument.Parse(message);
+            string? type = document.RootElement.TryGetProperty("type", out JsonElement typeElement)
+                ? typeElement.GetString()
+                : null;
+            if (type == "update-lighting") {
+                _lastLightingMessage = message;
+                _pendingLightingMessage = message;
+                SendPendingLightingMessage();
+            } else if (type == "field-lighting-options") {
+                _lastFieldLightingMessage = message;
+                _pendingFieldLightingMessage = message;
+                SendPendingFieldLightingMessage();
+            } else if (type == "load-animation") {
+                _lastAnimationMessage = message;
+                _pendingAnimationMessage = message;
+                SendPendingAnimationMessage();
+            } else {
+                _lastViewerMessage = message;
+                _pendingMessage = message;
+                SendPendingMessage();
+            }
+        }
+
         public void UpdateLighting(object? lighting) {
-            _pendingLightingMessage = JsonSerializer.Serialize(new {
+            string message = JsonSerializer.Serialize(new {
                 type = "update-lighting",
                 lighting,
             });
-            SendPendingMessage();
+            _lastLightingMessage = message;
+            _pendingLightingMessage = message;
+            ViewerMessageProduced?.Invoke(message);
+            SendPendingLightingMessage();
         }
 
-        private async Task PrepareModelPreviewAsync(Func<ModelRoot> buildModel, string name, object? lighting, float cameraZoom, long request) {
+        private async Task PrepareModelPreviewAsync(Func<ModelRoot> buildModel, string name, object? lighting, float cameraZoom, string cameraMode, bool hideControls, long request) {
             await _buildGate.WaitAsync();
             try {
                 if (request != Interlocked.Read(ref _modelRequest))
@@ -89,14 +174,16 @@ namespace CrossSlash {
                 if (request != Interlocked.Read(ref _modelRequest))
                     return;
 
-                _pendingMessage = JsonSerializer.Serialize(new {
+                string message = JsonSerializer.Serialize(new {
                     type = "load-model",
                     name,
                     glbBase64,
                     lighting,
                     cameraZoom,
+                    cameraMode,
+                    hideControls,
                 });
-                SendPendingMessage();
+                QueueViewerMessage(message);
             } catch (Exception ex) {
                 if (request == Interlocked.Read(ref _modelRequest))
                     ShowError($"Could not prepare the preview: {ex.Message}");
@@ -105,12 +192,44 @@ namespace CrossSlash {
             }
         }
 
+        private async Task PrepareAnimationPreviewAsync(Func<ModelRoot> buildModel, string name, long modelRequest, long animationRequest) {
+            await _buildGate.WaitAsync();
+            try {
+                if (modelRequest != Interlocked.Read(ref _modelRequest) || animationRequest != Interlocked.Read(ref _animationRequest))
+                    return;
+
+                string glbBase64 = await Task.Run(() => {
+                    ModelRoot model = buildModel();
+                    return Convert.ToBase64String(model.WriteGLB().ToArray());
+                });
+                if (modelRequest != Interlocked.Read(ref _modelRequest) || animationRequest != Interlocked.Read(ref _animationRequest))
+                    return;
+
+                string message = JsonSerializer.Serialize(new {
+                    type = "load-animation",
+                    name,
+                    glbBase64,
+                });
+                _lastAnimationMessage = message;
+                _pendingAnimationMessage = message;
+                ViewerMessageProduced?.Invoke(message);
+                SendPendingAnimationMessage();
+            } catch (Exception ex) {
+                if (modelRequest == Interlocked.Read(ref _modelRequest) && animationRequest == Interlocked.Read(ref _animationRequest))
+                    ShowError($"Could not prepare the animation preview: {ex.Message}");
+            } finally {
+                _buildGate.Release();
+            }
+        }
+
         public void ShowMessage(string message) {
             Interlocked.Increment(ref _modelRequest);
-            _pendingMessage = JsonSerializer.Serialize(new { type = "clear", message });
+            Interlocked.Increment(ref _animationRequest);
+            _lastAnimationMessage = null;
+            _pendingAnimationMessage = null;
+            QueueViewerMessage(JsonSerializer.Serialize(new { type = "clear", message }));
             _status.Text = message;
             _status.Visibility = Visibility.Visible;
-            SendPendingMessage();
         }
 
         private async void InitializeWebView(object sender, RoutedEventArgs e) {
@@ -159,6 +278,8 @@ namespace CrossSlash {
                     _status.Visibility = Visibility.Collapsed;
                     SendViewerPreparation();
                     SendPendingMessage();
+                    SendEditLightsVisibility();
+                    SendPopOutVisibility();
                     _webView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new {
                         type = "visibility",
                         visible = IsVisible,
@@ -170,6 +291,14 @@ namespace CrossSlash {
                         ? messageElement.GetString() ?? "Unknown viewer error."
                         : "Unknown viewer error.";
                     ShowError($"Preview failed: {detail}");
+                } else if (type == "edit-lights") {
+                    _editLightsAction?.Invoke();
+                } else if (type == "pop-out") {
+                    Dispatcher.BeginInvoke(new Action(() => _popOutAction?.Invoke()));
+                } else if (type == "field-scene-selected") {
+                    ViewerActionRequested?.Invoke("field-scene", root.TryGetProperty("fieldId", out JsonElement fieldIdElement) ? fieldIdElement.GetString() : null);
+                } else if (type == "lighting-model-selected") {
+                    ViewerActionRequested?.Invoke("lighting-model", root.TryGetProperty("index", out JsonElement indexElement) ? indexElement.GetString() : null);
                 }
             } catch (JsonException) {
                 // Ignore malformed messages from the preview page.
@@ -188,11 +317,22 @@ namespace CrossSlash {
             if (!_pageReady || _pendingMessage == null || _webView.CoreWebView2 == null)
             {
                 SendPendingLightingMessage();
+                SendPendingFieldLightingMessage();
+                SendPendingAnimationMessage();
                 return;
             }
             _webView.CoreWebView2.PostWebMessageAsJson(_pendingMessage);
             _pendingMessage = null;
             SendPendingLightingMessage();
+            SendPendingFieldLightingMessage();
+            SendPendingAnimationMessage();
+        }
+
+        private void SendPendingAnimationMessage() {
+            if (!_pageReady || _pendingAnimationMessage == null || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(_pendingAnimationMessage);
+            _pendingAnimationMessage = null;
         }
 
         private void SendPendingLightingMessage() {
@@ -200,6 +340,31 @@ namespace CrossSlash {
                 return;
             _webView.CoreWebView2.PostWebMessageAsJson(_pendingLightingMessage);
             _pendingLightingMessage = null;
+        }
+
+        private void SendPendingFieldLightingMessage() {
+            if (!_pageReady || _pendingFieldLightingMessage == null || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(_pendingFieldLightingMessage);
+            _pendingFieldLightingMessage = null;
+        }
+
+        private void SendEditLightsVisibility() {
+            if (!_pageReady || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {
+                type = "edit-lights-visibility",
+                visible = _editLightsAction != null,
+            }));
+        }
+
+        private void SendPopOutVisibility() {
+            if (!_pageReady || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {
+                type = "pop-out-visibility",
+                visible = _popOutAction != null,
+            }));
         }
 
         private void RequestViewerPreparation() {
@@ -216,9 +381,18 @@ namespace CrossSlash {
 
         private void ShowError(string message) {
             Interlocked.Increment(ref _modelRequest);
-            _pendingMessage = JsonSerializer.Serialize(new { type = "clear", message });
+            Interlocked.Increment(ref _animationRequest);
+            _lastAnimationMessage = null;
+            _pendingAnimationMessage = null;
+            QueueViewerMessage(JsonSerializer.Serialize(new { type = "clear", message }));
             _status.Text = message;
             _status.Visibility = Visibility.Visible;
+        }
+
+        private void QueueViewerMessage(string message) {
+            _lastViewerMessage = message;
+            _pendingMessage = message;
+            ViewerMessageProduced?.Invoke(message);
             SendPendingMessage();
         }
     }

@@ -11,6 +11,7 @@ namespace CrossSlash {
         public Dictionary<string, string> ExporterSourcePaths { get; set; } = new(StringComparer.InvariantCultureIgnoreCase);
         public string? LastOutputDirectory { get; set; }
         public string? LastExtractDirectory { get; set; }
+        public bool PrefixAnimationNamesWithModelName { get; set; }
 
         public string? GetExporterSourcePath(string exporterKey) {
             ExporterSourcePaths ??= new Dictionary<string, string>(StringComparer.InvariantCultureIgnoreCase);
@@ -67,6 +68,16 @@ namespace CrossSlash {
                 Save(preferences);
             } catch {
                 // A failure to remember a dialog location should not interrupt an export.
+            }
+        }
+
+        public static void RememberAnimationNamePrefix(bool enabled) {
+            try {
+                var preferences = Load();
+                preferences.PrefixAnimationNamesWithModelName = enabled;
+                Save(preferences);
+            } catch {
+                // A failure to remember an export preference should not interrupt the UI.
             }
         }
 

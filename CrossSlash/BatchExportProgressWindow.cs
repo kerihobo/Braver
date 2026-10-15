@@ -42,8 +42,9 @@ namespace CrossSlash {
                 HorizontalAlignment = HorizontalAlignment.Right,
             };
             _cancelButton = DesktopUi.CreateButton("Cancel");
-            _cancelButton.Width = 96;
-            _cancelButton.Height = 30;
+            _cancelButton.Width = 128;
+            _cancelButton.Height = 36;
+            _cancelButton.Padding = new Thickness(12, 4, 12, 4);
             _cancelButton.HorizontalAlignment = HorizontalAlignment.Right;
             _cancelButton.Margin = new Thickness(0, 12, 0, 0);
             _cancelButton.Click += (_, _) => {

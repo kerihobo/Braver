@@ -14,11 +14,13 @@
         <span id="model-name"></span>
         <span id="animation-label" hidden></span>
       </div>
+      <button id="pop-out-button" type="button" aria-label="Pop out preview" title="Open preview in a resizable window">⤢</button>
 
       <section id="controls" aria-label="Animation controls">
         <div class="control-row">
           <button id="play-button" type="button" disabled>Play</button>
           <button id="reset-button" type="button" disabled>Reset</button>
+          <button id="edit-lights-button" type="button">Edit lights…</button>
         </div>
         <div class="control-row timeline-row">
           <input id="timeline" type="range" min="0" max="1000" value="0" disabled aria-label="Animation position" />
@@ -29,6 +31,18 @@
             <option value="1" selected>1×</option>
             <option value="2">2×</option>
           </select>
+        </div>
+        <div id="field-lighting-row" class="control-row" hidden>
+          <div id="field-picker" class="searchable-dropdown">
+            <input id="field-search" type="text" placeholder="Search scenes…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="field-options" />
+            <button id="field-toggle" class="dropdown-toggle" type="button" aria-label="Show field scenes" aria-expanded="false">▾</button>
+            <div id="field-options" class="dropdown-options" role="listbox" hidden></div>
+          </div>
+          <div id="lighting-model-picker" class="searchable-dropdown">
+            <input id="lighting-model-search" type="text" placeholder="Search lighting models…" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="lighting-model-options" />
+            <button id="lighting-model-toggle" class="dropdown-toggle" type="button" aria-label="Show lighting models" aria-expanded="false">▾</button>
+            <div id="lighting-model-options" class="dropdown-options" role="listbox" hidden></div>
+          </div>
         </div>
       </section>
     </main>

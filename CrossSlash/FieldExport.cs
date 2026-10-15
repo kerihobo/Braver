@@ -14,7 +14,10 @@ using System.Windows.Threading;
 
 namespace CrossSlash {
     public class FieldExport : ExportKind {
-        private ModelBaseOptions _config = new ModelBaseOptions();
+        private sealed class FieldExportConfig : ModelBaseOptions {
+        }
+
+        private FieldExportConfig _config = new();
         public override string Help =>
 @"Usage: CrossSlash FieldModel [SourceLGPOrFolder] [OutputFile] [HRCFile] [anim1] [anim2] [anim3...] [options]
     Valid options:
@@ -33,6 +36,7 @@ namespace CrossSlash {
         public override void Execute(DataSource source, string dest, IEnumerable<string> parameters) {
             var exporter = new FieldModel(source, _config);
             var model = exporter.BuildScene(parameters.First(), parameters.Skip(1));
+            FieldExportWindow.AddRootContainerMarker(model);
             model.SaveGLB(dest);
         }
 
@@ -54,6 +58,7 @@ namespace CrossSlash {
         public double PositionMultiplier { get; set; } = 5.0;
         public double ReachMultiplier { get; set; } = 20.0;
         public double StrengthMultiplier { get; set; } = 1.0;
+        public bool DynamicLighting { get; set; }
         public List<FieldPreviewPointLight> PointLights { get; set; } = new();
 
         public static FieldPreviewLightingSettings CreateWorkingDefaults() => new() {
@@ -70,6 +75,7 @@ namespace CrossSlash {
             PositionMultiplier = PositionMultiplier,
             ReachMultiplier = ReachMultiplier,
             StrengthMultiplier = StrengthMultiplier,
+            DynamicLighting = DynamicLighting,
             PointLights = PointLights.Select(light => light.Clone()).ToList(),
         };
     }
@@ -84,6 +90,7 @@ namespace CrossSlash {
         private List<string> _compatibleAnimationFiles = new();
         private readonly HashSet<string> _selectedAnimationFiles = new(StringComparer.OrdinalIgnoreCase);
         private readonly CheckBox _chkEmbedAnimations;
+        private readonly CheckBox _chkPrefixAnimations;
         private readonly CheckBox _chkFirstFrameBindPose;
         private bool _refreshingAnimationList;
         private readonly CheckBox _chkSRGB;
@@ -94,25 +101,41 @@ namespace CrossSlash {
         private readonly DataSource _source;
         private readonly FieldModel _compatibilityExporter;
         private readonly ModelPreviewControl _preview;
+        private readonly ModelPreviewWindowHost _previewWindowHost;
+        private readonly Grid _previewHost;
         private readonly DispatcherTimer _previewTimer;
         private long _animationLookupRequest;
         private bool _animationLookupPending;
         private string? _previewAnimationFile;
         private FieldPreviewLightingSettings _lightingSettings = FieldPreviewLightingSettings.CreateWorkingDefaults();
         private FieldLightingEditorWindow? _lightingEditorWindow;
+        private string _selectedLightingField = string.Empty;
+        private int _selectedLightingModelIndex;
 
         public FieldExportWindow(DataSource source) {
             _source = source;
             _compatibilityExporter = new FieldModel(source, new ModelBaseOptions());
             _preview = new ModelPreviewControl { Height = 340 };
+            _previewWindowHost = new ModelPreviewWindowHost(this, _preview);
+            _previewHost = new Grid { Height = 340 };
+            _selectedLightingField = FieldLightingPresetCatalog.FieldIds
+                .FirstOrDefault(field => field.Equals("md1stin", StringComparison.OrdinalIgnoreCase))
+                ?? FieldLightingPresetCatalog.FieldIds.FirstOrDefault()
+                ?? string.Empty;
+            _selectedLightingModelIndex = 0;
+            _preview.SetEditLightsAction(OpenLightingEditorWindow);
+            _preview.ViewerActionRequested += HandleViewerAction;
             _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
             _previewTimer.Tick += (_, _) => {
                 _previewTimer.Stop();
                 RefreshPreview();
             };
+            UpdateFieldPresetControl();
+            ApplySelectedFieldPreset();
             Closed += (_, _) => {
                 _previewTimer.Stop();
                 Interlocked.Increment(ref _animationLookupRequest);
+                _previewWindowHost.Close();
             };
             _hrcFiles = source.AllFiles
                 .Where(file => Path.GetExtension(file).Equals(".hrc", StringComparison.OrdinalIgnoreCase))
@@ -162,10 +185,18 @@ namespace CrossSlash {
                 IsChecked = true,
                 Margin = new Thickness(0, 0, 18, 8),
             };
+            _chkPrefixAnimations = new CheckBox {
+                Content = "Prefix animation names",
+                IsChecked = PreferencesStore.Load().PrefixAnimationNamesWithModelName,
+                ToolTip = "Add the model name to exported animation names and files.",
+                Margin = new Thickness(0, 0, 18, 8),
+            };
+            _chkPrefixAnimations.Checked += (_, _) => PreferencesStore.RememberAnimationNamePrefix(true);
+            _chkPrefixAnimations.Unchecked += (_, _) => PreferencesStore.RememberAnimationNamePrefix(false);
             _chkEmbedAnimations.Checked += (_, _) => { UpdateAnimationControlState(); SchedulePreview(); };
             _chkEmbedAnimations.Unchecked += (_, _) => { UpdateAnimationControlState(); SchedulePreview(); };
             _chkFirstFrameBindPose = new CheckBox {
-                Content = "Use first animation frame as bind pose",
+                Content = "First-frame bind pose",
                 IsChecked = false,
                 ToolTip = "Use the first frame of the first compatible animation as the field model's bind pose.",
                 Margin = new Thickness(0, 0, 18, 8),
@@ -180,7 +211,6 @@ namespace CrossSlash {
                     _selectedAnimationFiles.Remove(animation);
                 foreach (string animation in e.AddedItems.Cast<string>())
                     _selectedAnimationFiles.Add(animation);
-                SchedulePreview();
             };
             _lstAnimations.PreviewMouseLeftButtonDown += (sender, e) => {
                 if (!TryGetAnimationItem(e.OriginalSource as DependencyObject, out _, out string animation))
@@ -197,6 +227,7 @@ namespace CrossSlash {
             };
             _lvHRCs.SelectionChanged += (_, _) => {
                 RefreshCompatibleAnimations();
+                SelectFieldPresetForCurrentModel();
                 SchedulePreview();
             };
             _lvHRCs.Loaded += (_, _) => {
@@ -236,31 +267,40 @@ namespace CrossSlash {
             pickerColumns.Children.Add(animationColumn);
 
             var previewColumn = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-            var previewHeader = new Grid { Height = 24, Margin = new Thickness(0, 0, 0, 12) };
-            previewHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            previewHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var previewTitle = DesktopUi.CreateSectionTitle("Preview");
-            previewTitle.Margin = new Thickness(0);
-            previewTitle.VerticalAlignment = VerticalAlignment.Center;
-            previewHeader.Children.Add(previewTitle);
-            var editLighting = DesktopUi.CreateButton("Edit lights…");
-            editLighting.Height = 24;
-            editLighting.Padding = new Thickness(8, 0, 8, 0);
-            editLighting.Margin = new Thickness(8, 0, 0, 0);
-            editLighting.VerticalAlignment = VerticalAlignment.Center;
-            editLighting.Click += (_, _) => OpenLightingEditorWindow();
-            Grid.SetColumn(editLighting, 1);
-            previewHeader.Children.Add(editLighting);
-            previewColumn.Children.Add(previewHeader);
-            previewColumn.Children.Add(_preview);
+            previewColumn.Children.Add(_previewHost);
+            _previewWindowHost.AttachTo(_previewHost);
             Grid.SetColumn(previewColumn, 2);
             pickerColumns.Children.Add(previewColumn);
 
             content.Children.Add(pickerColumns);
-            content.Children.Add(new WrapPanel {
-                Margin = new Thickness(0, 4, 0, 16),
-                Children = { DesktopUi.CreateScaleOption(_txtScale), _chkSRGB, _chkSwapWinding, _chkBakeColours, _chkEmbedAnimations, _chkFirstFrameBindPose },
-            });
+            var exportOptions = new Grid { Margin = new Thickness(0, 4, 0, 16) };
+            for (int i = 0; i < 4; i++)
+                exportOptions.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (int i = 0; i < 2; i++)
+                exportOptions.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            FrameworkElement[] fieldOptions = {
+                (FrameworkElement)DesktopUi.CreateScaleOption(_txtScale),
+                _chkEmbedAnimations,
+                _chkSRGB,
+                _chkSwapWinding,
+                _chkBakeColours,
+                _chkPrefixAnimations,
+                _chkFirstFrameBindPose,
+            };
+            for (int i = 0; i < fieldOptions.Length; i++) {
+                FrameworkElement option = fieldOptions[i];
+                option.Margin = new Thickness(4, 4, 8, 4);
+                option.VerticalAlignment = VerticalAlignment.Center;
+                if (option is CheckBox checkBox) {
+                    checkBox.MinHeight = 36;
+                    checkBox.VerticalContentAlignment = VerticalAlignment.Center;
+                    checkBox.Content = new TextBlock { Text = checkBox.Content?.ToString(), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+                }
+                Grid.SetRow(option, i / 4);
+                Grid.SetColumn(option, i % 4);
+                exportOptions.Children.Add(option);
+            }
+            content.Children.Add(exportOptions);
 
             var export = DesktopUi.CreateButton("Export selected", primary: true);
             export.Click += (_, _) => ExportOne();
@@ -300,6 +340,12 @@ namespace CrossSlash {
                     includeAnimations: _chkEmbedAnimations.IsChecked == true,
                     useFirstAnimationFrameAsBindPose: _chkFirstFrameBindPose.IsChecked == true
                 );
+                AnimationExportNaming.PrefixAnimationNames(
+                    model,
+                    Path.GetFileNameWithoutExtension(hrcFile),
+                    _chkPrefixAnimations.IsChecked == true
+                );
+                AddRootContainerMarker(model);
                 model.SaveGLB(outputFile);
                 PreferencesStore.RememberOutputPath(outputFile);
 
@@ -328,6 +374,7 @@ namespace CrossSlash {
                 ModelBaseOptions options = GetOptions();
                 bool includeAnimations = _chkEmbedAnimations.IsChecked == true;
                 bool useFirstFrame = _chkFirstFrameBindPose.IsChecked == true;
+                bool prefixAnimations = _chkPrefixAnimations.IsChecked == true;
                 string result = await BatchExportRunner.RunAsync(
                     this,
                     "Exporting all field models",
@@ -353,7 +400,10 @@ namespace CrossSlash {
                                     includeAnimations: includeAnimations,
                                     useFirstAnimationFrameAsBindPose: useFirstFrame
                                 );
-                                model.SaveGLB(Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(hrcFile) + ".glb"));
+                                string modelName = Path.GetFileNameWithoutExtension(hrcFile);
+                                AnimationExportNaming.PrefixAnimationNames(model, modelName, prefixAnimations);
+                                AddRootContainerMarker(model);
+                                model.SaveGLB(Path.Combine(outputDirectory, modelName + ".glb"));
                                 exported++;
                                 animationCount += usedAnimations.Count;
                                 if (usedAnimations.Count == 0)
@@ -392,6 +442,7 @@ namespace CrossSlash {
                 DataSource source = _source;
                 ModelBaseOptions options = GetOptions();
                 bool useFirstFrame = _chkFirstFrameBindPose.IsChecked == true;
+                bool prefixAnimations = _chkPrefixAnimations.IsChecked == true;
                 string result = await BatchExportRunner.RunAsync(
                     this,
                     "Exporting all field animations",
@@ -418,11 +469,13 @@ namespace CrossSlash {
                                     includeAnimations: true,
                                     useFirstAnimationFrameAsBindPose: useFirstFrame
                                 );
+                                string modelName = Path.GetFileNameWithoutExtension(hrcFile);
+                                AnimationExportNaming.PrefixAnimationNames(model, modelName, prefixAnimations);
                                 animationCount += usedAnimations.Count;
                                 if (usedAnimations.Count == 0) {
                                     modelsWithoutAnimations++;
                                 } else {
-                                    string outputFile = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(hrcFile), "Animations.glb");
+                                    string outputFile = Path.Combine(outputDirectory, modelName, AnimationExportNaming.GetAnimationFileName(modelName, prefixAnimations));
                                     Directory.CreateDirectory(Path.GetDirectoryName(outputFile)!);
                                     model.SaveGLB(outputFile);
                                     exportedModels++;
@@ -569,6 +622,71 @@ namespace CrossSlash {
             }, hrcFile, CreateFieldPointLighting(_lightingSettings));
         }
 
+        private void SelectFieldPresetForCurrentModel() {
+            if (_lvHRCs.SelectedItem is string selectedHrc && TryGetSelectedLightingModels(out var models)) {
+                string modelId = Path.GetFileNameWithoutExtension(selectedHrc);
+                int match = models.ToList().FindIndex(model =>
+                    model.HrcId.Equals(modelId, StringComparison.OrdinalIgnoreCase));
+                if (match >= 0)
+                    _selectedLightingModelIndex = match;
+            }
+            UpdateFieldPresetControl();
+            ApplySelectedFieldPreset();
+        }
+
+        private void HandleViewerAction(string action, string? value) {
+            if (action == "field-scene" && !string.IsNullOrWhiteSpace(value) &&
+                FieldLightingPresetCatalog.Presets.ContainsKey(value)) {
+                _selectedLightingField = value;
+                _selectedLightingModelIndex = 0;
+                UpdateFieldPresetControl();
+                ApplySelectedFieldPreset();
+            } else if (action == "lighting-model" && int.TryParse(value, out int modelIndex) &&
+                TryGetSelectedLightingModels(out var selectedModels) && modelIndex >= 0 && modelIndex < selectedModels.Count) {
+                _selectedLightingModelIndex = modelIndex;
+                UpdateFieldPresetControl();
+                ApplySelectedFieldPreset();
+            }
+        }
+
+        private bool TryGetSelectedLightingModels(out IReadOnlyList<FieldLightingModelPreset> models) {
+            if (FieldLightingPresetCatalog.Presets.TryGetValue(_selectedLightingField, out var found)) {
+                models = found;
+                return true;
+            }
+            models = Array.Empty<FieldLightingModelPreset>();
+            return false;
+        }
+
+        private void UpdateFieldPresetControl() {
+            IReadOnlyList<FieldLightingModelPreset> models = TryGetSelectedLightingModels(out var selectedModels)
+                ? selectedModels
+                : Array.Empty<FieldLightingModelPreset>();
+            if (_selectedLightingModelIndex < 0 || _selectedLightingModelIndex >= models.Count)
+                _selectedLightingModelIndex = models.Count == 0 ? -1 : 0;
+            _preview.SetFieldLightingOptions(new {
+                fields = FieldLightingPresetCatalog.FieldIds.Select(field => new { id = field, label = field }).ToArray(),
+                selectedField = _selectedLightingField,
+                models = models.Select((model, index) => new { index, label = model.DisplayName }).ToArray(),
+                selectedModelIndex = _selectedLightingModelIndex,
+            });
+        }
+
+        private void ApplySelectedFieldPreset() {
+            if (!TryGetSelectedLightingModels(out var models) || _selectedLightingModelIndex < 0 ||
+                _selectedLightingModelIndex >= models.Count)
+                return;
+            FieldLightingModelPreset preset = models[_selectedLightingModelIndex];
+            _lightingSettings.AmbientColor = preset.GlobalLight.ToPackedRgb();
+            _lightingSettings.PointLights = preset.PointLights.Select(light => new FieldPreviewPointLight {
+                Color = light.ToPackedRgb(),
+                X = light.X,
+                Y = light.Y,
+                Z = light.Z,
+            }).ToList();
+            _preview.UpdateLighting(CreateFieldPointLighting(_lightingSettings));
+        }
+
         private static object CreateFieldPointLighting(FieldPreviewLightingSettings settings) {
             double safePositionMultiplier = Math.Clamp(settings.PositionMultiplier, 0.25, 10.0);
             double safeReachMultiplier = Math.Clamp(settings.ReachMultiplier, 1.0, 100.0);
@@ -585,10 +703,26 @@ namespace CrossSlash {
             return new {
                 ambientColor = settings.AmbientColor,
                 ambientIntensity = safeAmbientTintMultiplier,
+                dynamic = settings.DynamicLighting,
                 // FF7 field light positions use 512 coordinate units per model unit.
                 positionScale = FieldLightPositionScale / safePositionMultiplier,
                 pointLights,
             };
+        }
+
+        internal static void AddRootContainerMarker(SharpGLTF.Schema2.ModelRoot model) {
+            var rootContainer = model.LogicalNodes.FirstOrDefault(node =>
+                string.Equals(node.Name, "RootContainer", StringComparison.OrdinalIgnoreCase));
+            if (rootContainer == null)
+                throw new InvalidDataException("The field model GLB has no RootContainer node to mark as a Blender model root.");
+
+            var extras = new Dictionary<string, object>();
+            if (rootContainer.Extras.Content is IReadOnlyDictionary<string, object> existingExtras) {
+                foreach (var entry in existingExtras)
+                    extras[entry.Key] = entry.Value;
+            }
+            extras["FF7_RootContainer"] = true;
+            rootContainer.Extras = SharpGLTF.IO.JsonContent.Serialize(extras);
         }
 
         private void OpenLightingEditorWindow() {
@@ -634,7 +768,24 @@ namespace CrossSlash {
 
         private void PreviewAnimation(string animation) {
             _previewAnimationFile = animation;
-            SchedulePreview();
+            if (_lvHRCs.SelectedItem is not string hrcFile)
+                return;
+
+            DataSource source = _source;
+            ModelBaseOptions options = GetOptions();
+            bool useFirstAnimationFrameAsBindPose = _chkFirstFrameBindPose.IsChecked == true;
+            _preview.ShowAnimation(() => {
+                var exporter = new FieldModel(source, options);
+                return exporter.BuildScene(
+                    hrcFile,
+                    new[] { animation },
+                    compatibleAnimationsOnly: true,
+                    out _,
+                    includeAnimations: true,
+                    maxAnimationCount: 1,
+                    useFirstAnimationFrameAsBindPose: useFirstAnimationFrameAsBindPose
+                );
+            }, animation);
         }
 
         private bool TryGetAnimationItem(DependencyObject? source, out ListBoxItem? item, out string animation) {
