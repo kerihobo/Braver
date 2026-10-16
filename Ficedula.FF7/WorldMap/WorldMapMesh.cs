@@ -14,6 +14,7 @@ namespace Ficedula.FF7.WorldMap {
     public struct MapTri {
         public byte Vert0, Vert1, Vert2;
         public byte Walkmap;
+        public byte Script;
         public byte U0, V0, U1, V1, U2, V2;
         public int Texture;
         public byte Location;
@@ -23,7 +24,9 @@ namespace Ficedula.FF7.WorldMap {
             Vert0 = (byte)s.ReadByte();
             Vert1 = (byte)s.ReadByte();
             Vert2 = (byte)s.ReadByte();
-            Walkmap = (byte)(s.ReadByte() & 0x1f);
+            byte scriptAndWalkmap = (byte)s.ReadByte();
+            Walkmap = (byte)(scriptAndWalkmap & 0x1f);
+            Script = (byte)(scriptAndWalkmap >> 5);
             U0 = (byte)s.ReadByte();
             V0 = (byte)s.ReadByte();
             U1 = (byte)s.ReadByte();

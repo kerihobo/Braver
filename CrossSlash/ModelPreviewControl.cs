@@ -27,6 +27,9 @@ namespace CrossSlash {
         private string? _lastFieldLightingMessage;
         private bool? _fieldLocationWireframeVisible;
         private bool _fieldLocationWireframeToggleVisible;
+        private bool _terrainViewModeControlVisible;
+        private string _terrainViewMode = "textured";
+        private int _terrainMapId = -1;
         private Action? _editLightsAction;
         private bool _initializationStarted;
         private bool _pageReady;
@@ -69,7 +72,7 @@ namespace CrossSlash {
             Loaded += InitializeWebView;
         }
 
-        public void ShowModel(Func<ModelRoot> buildModel, string name, object? lighting = null, float cameraZoom = 1.2f, string cameraMode = "orbit", bool hideControls = false, Func<object?>? getPreviewData = null, float flyMovementSpeedScale = 1.0f) {
+        public void ShowModel(Func<ModelRoot> buildModel, string name, object? lighting = null, float cameraZoom = 1.2f, string cameraMode = "orbit", bool hideControls = false, Func<object?>? getPreviewData = null, float flyMovementSpeedScale = 1.0f, bool preserveCamera = false) {
             long request = Interlocked.Increment(ref _modelRequest);
             Interlocked.Increment(ref _animationRequest);
             _lastAnimationMessage = null;
@@ -78,7 +81,7 @@ namespace CrossSlash {
             _status.Text = $"Loading {name} preview…";
             _status.Visibility = Visibility.Visible;
             RequestViewerPreparation();
-            _ = PrepareModelPreviewAsync(buildModel, name, lighting, cameraZoom, cameraMode, hideControls, getPreviewData, flyMovementSpeedScale, request);
+            _ = PrepareModelPreviewAsync(buildModel, name, lighting, cameraZoom, cameraMode, hideControls, getPreviewData, flyMovementSpeedScale, preserveCamera, request);
         }
 
         private long _animationRequest;
@@ -111,6 +114,7 @@ namespace CrossSlash {
             if (_fieldLocationWireframeVisible.HasValue)
                 target.SetFieldLocationWireframe(_fieldLocationWireframeVisible.Value);
             target.SetFieldLocationWireframeToggleVisible(_fieldLocationWireframeToggleVisible);
+            target.SetTerrainViewModeControl(_terrainViewModeControlVisible, _terrainViewMode, _terrainMapId);
         }
 
         public void SetEditLightsAction(Action? action) {
@@ -144,6 +148,13 @@ namespace CrossSlash {
         public void SetFieldLocationWireframeToggleVisible(bool visible) {
             _fieldLocationWireframeToggleVisible = visible;
             SendFieldLocationWireframeToggleVisibility();
+        }
+
+        public void SetTerrainViewModeControl(bool visible, string mode, int mapId = -1) {
+            _terrainViewModeControlVisible = visible;
+            _terrainViewMode = mode;
+            _terrainMapId = mapId;
+            SendTerrainViewModeControl();
         }
 
         public void ReceiveViewerAction(string action, string? value) => ViewerActionRequested?.Invoke(action, value);
@@ -186,7 +197,7 @@ namespace CrossSlash {
             SendPendingLightingMessage();
         }
 
-        private async Task PrepareModelPreviewAsync(Func<ModelRoot> buildModel, string name, object? lighting, float cameraZoom, string cameraMode, bool hideControls, Func<object?>? getPreviewData, float flyMovementSpeedScale, long request) {
+        private async Task PrepareModelPreviewAsync(Func<ModelRoot> buildModel, string name, object? lighting, float cameraZoom, string cameraMode, bool hideControls, Func<object?>? getPreviewData, float flyMovementSpeedScale, bool preserveCamera, long request) {
             await _buildGate.WaitAsync();
             try {
                 if (request != Interlocked.Read(ref _modelRequest))
@@ -209,6 +220,7 @@ namespace CrossSlash {
                     cameraMode,
                     hideControls,
                     flyMovementSpeedScale,
+                    preserveCamera,
                     previewData = preview.previewData,
                 });
                 QueueViewerMessage(message);
@@ -309,6 +321,7 @@ namespace CrossSlash {
                     SendEditLightsVisibility();
                     SendPopOutVisibility();
                     SendFieldLocationWireframeToggleVisibility();
+                    SendTerrainViewModeControl();
                     _webView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(new {
                         type = "visibility",
                         visible = IsVisible,
@@ -331,6 +344,8 @@ namespace CrossSlash {
                     ViewerActionRequested?.Invoke("field-scene", root.TryGetProperty("fieldId", out JsonElement fieldIdElement) ? fieldIdElement.GetString() : null);
                 } else if (type == "lighting-model-selected") {
                     ViewerActionRequested?.Invoke("lighting-model", root.TryGetProperty("index", out JsonElement indexElement) ? indexElement.GetString() : null);
+                } else if (type == "terrain-view-mode-selected") {
+                    ViewerActionRequested?.Invoke("terrain-view-mode", root.TryGetProperty("mode", out JsonElement modeElement) ? modeElement.GetString() : null);
                 }
             } catch (JsonException) {
                 // Ignore malformed messages from the preview page.
@@ -414,6 +429,17 @@ namespace CrossSlash {
             _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {
                 type = "field-location-wireframe-visibility",
                 visible = _fieldLocationWireframeToggleVisible,
+            }));
+        }
+
+        private void SendTerrainViewModeControl() {
+            if (!_pageReady || _webView.CoreWebView2 == null)
+                return;
+            _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new {
+                type = "terrain-view-mode-control",
+                visible = _terrainViewModeControlVisible,
+                mode = _terrainViewMode,
+                mapId = _terrainMapId,
             }));
         }
 

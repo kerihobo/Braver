@@ -736,7 +736,7 @@ function updateTimeLabel(time) {
   timeLabel.textContent = `${displayed.toFixed(2)} / ${duration.toFixed(2)} s`;
 }
 
-export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, cameraMode = 'orbit', previewData = null, movementSpeedScale = 1) {
+export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, cameraMode = 'orbit', previewData = null, movementSpeedScale = 1, preserveCamera = false) {
   const sequence = ++loadSequence;
   flyMovementSpeedScale = Number.isFinite(movementSpeedScale) && movementSpeedScale > 0 ? movementSpeedScale : 1;
   animationSequence++;
@@ -753,6 +753,12 @@ export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, camer
       disposeObject(gltf.scene);
       return;
     }
+    const savedCamera = preserveCamera && currentModel ? {
+      position: camera.position.clone(),
+      quaternion: camera.quaternion.clone(),
+      up: camera.up.clone(),
+      target: controls ? controls.target.clone() : null,
+    } : null;
     resetCurrentModel();
     ensureRenderer(cameraMode);
     currentModel = gltf;
@@ -779,6 +785,19 @@ export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, camer
     refreshStaticLightingTransforms(gltf.scene);
     isLoadingModel = false;
     fitCamera(gltf.scene, cameraZoom, cameraMode);
+    if (savedCamera) {
+      camera.position.copy(savedCamera.position);
+      camera.up.copy(savedCamera.up);
+      if (controls && savedCamera.target) {
+        controls.target.copy(savedCamera.target);
+        controls.update();
+      } else {
+        camera.quaternion.copy(savedCamera.quaternion);
+        const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+        flyYaw = euler.y;
+        flyPitch = euler.x;
+      }
+    }
     applyFieldLocationWireframe();
     setEmptyState('', false);
     scheduleFrame();

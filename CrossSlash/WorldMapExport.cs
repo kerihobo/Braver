@@ -47,7 +47,13 @@ namespace CrossSlash {
     }
 
     internal sealed class WorldMapExportWindow : Window {
-        internal sealed record TerrainMap(string FileName, int BlockCount, int VariantCount) {
+        private sealed record TerrainViewChoice(string Label, WorldMapTerrainExporter.PreviewMode Mode);
+
+        internal sealed record TerrainMap(string FileName, int BlockCount, int VariantSectionCount) {
+            public IReadOnlyList<WorldMapTerrainExporter.TerrainVariant> Variants =>
+                WorldMapTerrainExporter.GetAvailableVariants(VariantSectionCount);
+            public int VariantCount => Variants.Count;
+
             public int MapId => Path.GetFileNameWithoutExtension(FileName).ToUpperInvariant() switch {
                 "WM0" => 0,
                 "WM2" => 2,
@@ -147,10 +153,13 @@ namespace CrossSlash {
         private readonly TextBox _landmarkSearch;
         private readonly TextBox _landmarkAnimationSearch;
         private readonly TextBox _terrainSearch;
+        private readonly ComboBox _terrainViewMode;
         private readonly ListBox _terrainList;
+        private readonly ListBox _terrainVariantList;
         private readonly ListBox _landmarkList;
         private readonly ListBox _landmarkAnimationList;
         private readonly TextBlock _terrainTitle;
+        private readonly TextBlock _terrainVariantTitle;
         private readonly TextBlock _mapSourceLabel;
         private readonly TextBlock _landmarkTitle;
         private readonly TextBlock _landmarkAnimationTitle;
@@ -162,11 +171,17 @@ namespace CrossSlash {
         private readonly CheckBox _landmarkConvertSrgb;
         private readonly TextBox _scale;
         private readonly TextBox _landmarkScale;
+        private readonly RowDefinition _terrainMapListRow = new() { Height = new GridLength(1, GridUnitType.Star) };
+        private readonly RowDefinition _terrainVariantListRow = new() { Height = new GridLength(1, GridUnitType.Star) };
         private readonly HashSet<string> _selectedAnimations = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _selectedLandmarkAnimations = new(StringComparer.OrdinalIgnoreCase);
         private List<WorldModel> _vehicles;
         private List<WorldModel> _landmarks;
         private List<TerrainMap> _terrainMaps = new();
+        private string? _terrainVariantMapFile;
+        private bool _preserveTerrainCameraOnNextPreview;
+        private bool _refreshingTerrainList;
+        private bool _refreshingTerrainVariants;
         private List<string> _currentAnimations = new();
         private List<string> _currentLandmarkAnimations = new();
         private string? _previewAnimation;
@@ -220,11 +235,27 @@ namespace CrossSlash {
             _landmarkSearch = DesktopUi.CreateSearchTextBox("Search landmarks");
             _landmarkAnimationSearch = DesktopUi.CreateSearchTextBox("Search animations");
             _terrainSearch = DesktopUi.CreateSearchTextBox("Search maps");
+            _terrainViewMode = new ComboBox {
+                Width = 138,
+                ItemsSource = new[] {
+                    new TerrainViewChoice("Textured", WorldMapTerrainExporter.PreviewMode.Textured),
+                    new TerrainViewChoice("Terrain type", WorldMapTerrainExporter.PreviewMode.Terrain),
+                    new TerrainViewChoice("Region", WorldMapTerrainExporter.PreviewMode.Region),
+                    new TerrainViewChoice("Scripts", WorldMapTerrainExporter.PreviewMode.Scripts),
+                },
+                DisplayMemberPath = nameof(TerrainViewChoice.Label),
+                SelectedIndex = 0,
+                ToolTip = "Scripts view colors triangles by their encoded script ID and chocobo flag.",
+                VerticalAlignment = VerticalAlignment.Center,
+            };
             _terrainList = CreateListBox();
+            _terrainVariantList = CreateListBox();
+            _terrainVariantList.SelectionMode = SelectionMode.Multiple;
             _landmarkList = CreateListBox();
             _landmarkAnimationList = CreateListBox();
             _landmarkAnimationList.SelectionMode = SelectionMode.Multiple;
             _terrainTitle = DesktopUi.CreateSectionTitle("Terrain maps (0)");
+            _terrainVariantTitle = DesktopUi.CreateSectionTitle("Terrain variants (0)");
             _mapSourceLabel = new TextBlock {
                 Text = _terrainDataFolder ?? "Terrain data not found automatically.",
                 Foreground = DesktopUi.TextSecondaryBrush,
@@ -287,15 +318,26 @@ namespace CrossSlash {
             var browse = DesktopUi.CreateButton("Locate terrain data");
             browse.Click += (_, _) => BrowseMapFolder();
             var sourceRow = new Grid { Margin = new Thickness(10, 8, 10, 4) };
-            sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            sourceRow.Children.Add(DesktopUi.CreateSectionTitle("Terrain data"));
+            sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.28, GridUnitType.Star) });
+            sourceRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.72, GridUnitType.Star) });
+            var sourceControls = new Grid { Margin = new Thickness(10, 0, 0, 0) };
+            sourceControls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            sourceControls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            sourceControls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var sourceTitle = new TextBlock {
+                Text = "Terrain data",
+                Foreground = DesktopUi.TextSecondaryBrush,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0),
+            };
+            sourceControls.Children.Add(sourceTitle);
             _mapSourceLabel.Margin = new Thickness(10, 0, 10, 0);
             Grid.SetColumn(_mapSourceLabel, 1);
-            sourceRow.Children.Add(_mapSourceLabel);
+            Grid.SetColumn(sourceControls, 1);
+            sourceControls.Children.Add(_mapSourceLabel);
             Grid.SetColumn(browse, 2);
-            sourceRow.Children.Add(browse);
+            sourceControls.Children.Add(browse);
+            sourceRow.Children.Add(sourceControls);
 
             var columns = new Grid { Margin = new Thickness(10, 4, 10, 8) };
             columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.28, GridUnitType.Star) });
@@ -303,20 +345,53 @@ namespace CrossSlash {
             var list = new Grid { Margin = new Thickness(0, 0, 10, 0) };
             list.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             list.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            list.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            list.RowDefinitions.Add(_terrainMapListRow);
+            list.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            list.RowDefinitions.Add(_terrainVariantListRow);
             list.Children.Add(_terrainTitle);
             var search = DesktopUi.CreateSearchField("Search terrain maps…", _terrainSearch);
             Grid.SetRow(search, 1);
             list.Children.Add(search);
             Grid.SetRow(_terrainList, 2);
             list.Children.Add(_terrainList);
+            Grid.SetRow(_terrainVariantTitle, 3);
+            list.Children.Add(_terrainVariantTitle);
+            Grid.SetRow(_terrainVariantList, 4);
+            list.Children.Add(_terrainVariantList);
             columns.Children.Add(list);
 
             var preview = CreatePreviewPanel(_terrainPreview, _terrainPreviewWindowHost, "Preview");
             Grid.SetColumn(preview, 1);
             columns.Children.Add(preview);
+            _terrainPreview.SetTerrainViewModeControl(true, GetSelectedTerrainPreviewMode(), GetSelectedTerrainMapId());
+            _terrainPreview.ViewerActionRequested += (action, value) => {
+                if (action != "terrain-view-mode" || !Enum.TryParse(value, ignoreCase: true, out WorldMapTerrainExporter.PreviewMode mode))
+                    return;
+                TerrainViewChoice? choice = _terrainViewMode.Items
+                    .OfType<TerrainViewChoice>()
+                    .FirstOrDefault(option => option.Mode == mode);
+                if (choice != null)
+                    _terrainViewMode.SelectedItem = choice;
+            };
             _terrainSearch.TextChanged += (_, _) => RefreshTerrainList();
-            _terrainList.SelectionChanged += (_, _) => ScheduleTerrainPreview();
+            _terrainList.SelectionChanged += (_, _) => {
+                if (_refreshingTerrainList)
+                    return;
+                _preserveTerrainCameraOnNextPreview = false;
+                RefreshTerrainVariantList();
+                ScheduleTerrainPreview();
+            };
+            _terrainVariantList.SelectionChanged += (_, _) => {
+                if (!_refreshingTerrainVariants) {
+                    _preserveTerrainCameraOnNextPreview = true;
+                    ScheduleTerrainPreview();
+                }
+            };
+            _terrainViewMode.SelectionChanged += (_, _) => {
+                _terrainPreview.SetTerrainViewModeControl(true, GetSelectedTerrainPreviewMode(), GetSelectedTerrainMapId());
+                _preserveTerrainCameraOnNextPreview = true;
+                ScheduleTerrainPreview();
+            };
             _terrainList.Loaded += (_, _) => SelectFirstTerrainMap();
 
             var exportSelected = DesktopUi.CreateButton("Export selected", primary: true);
@@ -434,11 +509,19 @@ namespace CrossSlash {
             return panel;
         }
 
-        private static Grid CreatePreviewPanel(ModelPreviewControl preview, ModelPreviewWindowHost host, string title) {
+        private static Grid CreatePreviewPanel(ModelPreviewControl preview, ModelPreviewWindowHost host, string title, UIElement? headerAction = null) {
             var panel = new Grid { Margin = new Thickness(10, 0, 0, 0) };
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            panel.Children.Add(DesktopUi.CreateSectionTitle(title));
+            var header = new Grid();
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            header.Children.Add(DesktopUi.CreateSectionTitle(title));
+            if (headerAction != null) {
+                Grid.SetColumn(headerAction, 1);
+                header.Children.Add(headerAction);
+            }
+            panel.Children.Add(header);
             var previewHost = new Grid { MinHeight = 300, ClipToBounds = true };
             previewHost.Children.Add(preview);
             host.AttachTo(previewHost);
@@ -446,6 +529,11 @@ namespace CrossSlash {
             panel.Children.Add(previewHost);
             return panel;
         }
+
+        private string GetSelectedTerrainPreviewMode() =>
+            (_terrainViewMode.SelectedItem as TerrainViewChoice)?.Mode.ToString().ToLowerInvariant() ?? "textured";
+
+        private int GetSelectedTerrainMapId() => (_terrainList.SelectedItem as TerrainMap)?.MapId ?? -1;
 
         private UniformGrid CreateExportOptions() {
             var options = new UniformGrid { Columns = 4, Margin = new Thickness(8, 2, 8, 2) };
@@ -642,8 +730,8 @@ namespace CrossSlash {
                     using Stream stream = source.Open(file);
                     long storedSectionCount = stream.Length / WorldMapTerrainExporter.BlockByteLength;
                     if (storedSectionCount >= sectionCount && stream.Length % WorldMapTerrainExporter.BlockByteLength == 0) {
-                        int variantCount = mapId == 0 ? (int)(storedSectionCount - sectionCount) : 0;
-                        maps.Add(new TerrainMap(file, sectionCount, variantCount));
+                        int variantSectionCount = mapId == 0 ? (int)(storedSectionCount - sectionCount) : 0;
+                        maps.Add(new TerrainMap(file, sectionCount, variantSectionCount));
                     }
                 } catch {
                     // Ignore entries that cannot be opened as a terrain map.
@@ -897,6 +985,7 @@ namespace CrossSlash {
                 _terrainList.SelectedItem = _terrainMaps.FirstOrDefault(map => map.FileName.Equals(selectedFile, StringComparison.OrdinalIgnoreCase))
                     ?? _terrainList.Items[0];
             }
+            ScheduleTerrainPreview();
             if (_terrainMaps.Count == 0)
                 _terrainPreview.ShowMessage("FF7 terrain maps are separate WM*.MAP files. CrossSlash looked beside the selected archive and in Steam libraries. Use Locate terrain data to select the game's data\\wm folder.");
         }
@@ -906,13 +995,58 @@ namespace CrossSlash {
             List<TerrainMap> visible = _terrainMaps
                 .Where(map => map.Label.Contains(_terrainSearch.Text, StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            _terrainList.ItemsSource = visible;
-            _terrainList.DisplayMemberPath = nameof(TerrainMap.Label);
-            if (selectedFile != null)
-                _terrainList.SelectedItem = visible.FirstOrDefault(map => map.FileName.Equals(selectedFile, StringComparison.OrdinalIgnoreCase));
-            if (_terrainList.SelectedIndex < 0 && visible.Count > 0)
-                _terrainList.SelectedIndex = 0;
+            _refreshingTerrainList = true;
+            try {
+                _terrainList.ItemsSource = visible;
+                _terrainList.DisplayMemberPath = nameof(TerrainMap.Label);
+                if (selectedFile != null)
+                    _terrainList.SelectedItem = visible.FirstOrDefault(map => map.FileName.Equals(selectedFile, StringComparison.OrdinalIgnoreCase));
+                if (_terrainList.SelectedIndex < 0 && visible.Count > 0)
+                    _terrainList.SelectedIndex = 0;
+            } finally {
+                _refreshingTerrainList = false;
+            }
+            RefreshTerrainVariantList();
+            if (!string.Equals(selectedFile, (_terrainList.SelectedItem as TerrainMap)?.FileName, StringComparison.OrdinalIgnoreCase))
+                ScheduleTerrainPreview();
         }
+
+        private void RefreshTerrainVariantList() {
+            TerrainMap? map = _terrainList.SelectedItem as TerrainMap;
+            string? mapFile = map?.FileName;
+            bool mapChanged = !string.Equals(_terrainVariantMapFile, mapFile, StringComparison.OrdinalIgnoreCase);
+            HashSet<string> selectedVariants = mapChanged
+                ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                : _terrainVariantList.SelectedItems
+                    .OfType<WorldMapTerrainExporter.TerrainVariant>()
+                    .Select(variant => variant.Id)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _terrainVariantMapFile = mapFile;
+
+            List<WorldMapTerrainExporter.TerrainVariant> variants = map?.Variants.ToList() ?? new();
+            bool hasVariants = variants.Count > 0;
+            _terrainVariantTitle.Text = $"Terrain variants ({variants.Count:N0})";
+            _terrainVariantTitle.Visibility = hasVariants ? Visibility.Visible : Visibility.Collapsed;
+            _terrainVariantList.Visibility = hasVariants ? Visibility.Visible : Visibility.Collapsed;
+            _terrainVariantListRow.Height = hasVariants
+                ? new GridLength(1, GridUnitType.Star)
+                : new GridLength(0);
+
+            _refreshingTerrainVariants = true;
+            try {
+                _terrainVariantList.ItemsSource = variants;
+                _terrainVariantList.DisplayMemberPath = nameof(WorldMapTerrainExporter.TerrainVariant.Name);
+                foreach (var variant in variants.Where(variant => selectedVariants.Contains(variant.Id)))
+                    _terrainVariantList.SelectedItems.Add(variant);
+            } finally {
+                _refreshingTerrainVariants = false;
+            }
+        }
+
+        private WorldMapTerrainExporter.TerrainVariant[] GetSelectedTerrainVariants() =>
+            _terrainVariantList.SelectedItems
+                .OfType<WorldMapTerrainExporter.TerrainVariant>()
+                .ToArray();
 
         private void SelectFirstTerrainMap() {
             if (_terrainList.SelectedIndex < 0 && _terrainList.Items.Count > 0)
@@ -925,22 +1059,30 @@ namespace CrossSlash {
         }
 
         private void RefreshTerrainPreview() {
+            bool preserveCamera = _preserveTerrainCameraOnNextPreview;
+            _preserveTerrainCameraOnNextPreview = false;
             if (_terrainList.SelectedItem is not TerrainMap map) {
+                _terrainPreview.SetTerrainViewModeControl(true, GetSelectedTerrainPreviewMode(), -1);
                 _terrainPreview.ShowMessage(_terrainMaps.Count == 0
                     ? "No WM*.MAP files were found. Use Locate terrain data to select FF7's data\\wm folder."
                     : "Select a terrain map to preview it.");
                 return;
             }
             DataSource source = _mapSource;
+            _terrainPreview.SetTerrainViewModeControl(true, GetSelectedTerrainPreviewMode(), map.MapId);
+            WorldMapTerrainExporter.TerrainVariant[] variants = GetSelectedTerrainVariants();
+            WorldMapTerrainExporter.PreviewMode previewMode = (_terrainViewMode.SelectedItem as TerrainViewChoice)?.Mode
+                ?? WorldMapTerrainExporter.PreviewMode.Textured;
             var textureAnimations = new List<WorldMapTerrainExporter.TextureAnimationPreview>();
             _terrainPreview.ShowModel(
-                () => WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, CancellationToken.None, null, textureAnimations),
+                () => WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, CancellationToken.None, null, textureAnimations, variants, previewMode),
                 Path.GetFileNameWithoutExtension(map.FileName).ToUpperInvariant(),
                 cameraZoom: 4.0f,
                 cameraMode: "fly",
                 hideControls: true,
                 getPreviewData: () => new { textureAnimations },
-                flyMovementSpeedScale: 1.0f / 6.0f);
+                flyMovementSpeedScale: 1.0f / 6.0f,
+                preserveCamera: preserveCamera);
         }
 
         private async Task ExportSelectedTerrainAsync() {
@@ -951,9 +1093,11 @@ namespace CrossSlash {
                 if (outputFile == null)
                     return;
                 DataSource source = _mapSource;
+                WorldMapTerrainExporter.TerrainVariant[] variants = GetSelectedTerrainVariants();
                 string result = await BatchExportRunner.RunAsync(this, $"Exporting {map.Label}", map.BlockCount,
                     (progress, cancellationToken) => {
-                        ModelRoot model = WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, cancellationToken, progress);
+                        ModelRoot model = WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, cancellationToken, progress,
+                            enabledVariants: variants);
                         cancellationToken.ThrowIfCancellationRequested();
                         model.SaveGLB(outputFile);
                         return $"Exported {Path.GetFileNameWithoutExtension(map.FileName).ToUpperInvariant()} terrain to:\n{outputFile}";
@@ -976,6 +1120,8 @@ namespace CrossSlash {
                 if (outputDirectory == null)
                     return;
                 DataSource source = _mapSource;
+                TerrainMap? selectedMap = _terrainList.SelectedItem as TerrainMap;
+                WorldMapTerrainExporter.TerrainVariant[] selectedVariants = GetSelectedTerrainVariants();
                 string result = await BatchExportRunner.RunAsync(this, "Exporting all world terrain maps", maps.Length,
                     (progress, cancellationToken) => {
                         int exported = 0;
@@ -986,7 +1132,11 @@ namespace CrossSlash {
                             TerrainMap map = maps[index];
                             progress.Report(new BatchProgressUpdate(index, maps.Length, $"Exporting {map.Label}…"));
                             try {
-                                ModelRoot model = WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, cancellationToken, null);
+                                IReadOnlyCollection<WorldMapTerrainExporter.TerrainVariant> variants = selectedMap?.FileName.Equals(map.FileName, StringComparison.OrdinalIgnoreCase) == true
+                                    ? selectedVariants
+                                    : Array.Empty<WorldMapTerrainExporter.TerrainVariant>();
+                                ModelRoot model = WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, cancellationToken, null,
+                                    enabledVariants: variants);
                                 cancellationToken.ThrowIfCancellationRequested();
                                 string outputFile = Path.Combine(outputDirectory, $"{Path.GetFileNameWithoutExtension(map.FileName).ToUpperInvariant()}.glb");
                                 model.SaveGLB(outputFile);
@@ -1348,6 +1498,56 @@ namespace CrossSlash {
     internal static class WorldMapTerrainExporter {
         public const int BlockByteLength = 0xB800;
         private const int BlockSize = 32768;
+        private const int BaseOverworldSectionCount = 63;
+
+        internal enum PreviewMode {
+            Textured,
+            Terrain,
+            Region,
+            Scripts,
+        }
+
+        private static readonly IReadOnlyDictionary<int, string> OverworldTerrainColors = new Dictionary<int, string> {
+            [0] = "#4c3", [1] = "#3a3", [2] = "#977", [3] = "#00a", [4] = "#2bad9f", [5] = "#00d", [6] = "#14f", [7] = "#898",
+            [8] = "#ee7", [9] = "#aa5", [10] = "#eee", [11] = "#ff0", [12] = "#aa0", [13] = "#0d0", [14] = "#0e0", [15] = "#0f0",
+            [16] = "#a98", [17] = "#ffa", [18] = "#668", [19] = "#aa7", [20] = "#bba", [21] = "#a88", [22] = "#0af", [23] = "#000",
+            [24] = "#ee7", [25] = "#282", [26] = "#008", [27] = "#fbb", [28] = "#ffc", [29] = "#b99", [30] = "#c99",
+        };
+        private static readonly IReadOnlyDictionary<int, string> UnderwaterTerrainColors = new Dictionary<int, string> {
+            [0] = "#258", [3] = "#69a", [15] = "#479",
+        };
+        private static readonly IReadOnlyDictionary<int, string> GlacierTerrainColors = new Dictionary<int, string> {
+            [1] = "#aaa", [2] = "#cce", [9] = "#eee", [10] = "#fff",
+        };
+        private static readonly IReadOnlyDictionary<int, string> OverworldRegionColors = new Dictionary<int, string> {
+            [0] = "#605a5a", [1] = "#5c3", [2] = "#69c", [3] = "#988", [4] = "#d0a040", [5] = "#492", [6] = "#aa6039", [7] = "#809080",
+            [8] = "#6a7", [9] = "#e65", [10] = "#5e5", [11] = "#fff", [12] = "#a86", [13] = "#c97", [14] = "#0d0", [15] = "#8f0",
+            [16] = "#f9a", [17] = "#00a",
+        };
+        private static readonly IReadOnlyDictionary<int, string> UnderwaterRegionColors = new Dictionary<int, string> {
+            [0] = "#258", [18] = "#69a",
+        };
+        private static readonly IReadOnlyDictionary<int, string> GlacierRegionColors = new Dictionary<int, string> {
+            [11] = "#fff",
+        };
+        private static readonly IReadOnlyDictionary<int, string> ScriptColors = new Dictionary<int, string> {
+            [1] = "#555555", [2] = "#000000", [3] = "#ff4a00", [4] = "#ff0000", [5] = "#ff5500", [6] = "#ff8800", [7] = "#ffaa00", [8] = "#cc0000",
+        };
+
+        internal sealed record TerrainVariant(string Id, string Name, int[] BaseSections, int[] AlternativeBlocks);
+        private readonly record struct PreviewColor(string Key, Vector4 Value);
+
+        private static readonly TerrainVariant[] OverworldVariants = {
+            new("temple", "Temple of the Ancients gone", new[] { 50 }, new[] { 63 }),
+            new("junon", "Junon Area crater", new[] { 41, 42 }, new[] { 64, 65 }),
+            new("mideel", "Mideel after Lifestream", new[] { 60 }, new[] { 66 }),
+            new("cosmo", "Cosmo Canyon crater", new[] { 47, 48 }, new[] { 67, 68 }),
+        };
+
+        internal static IReadOnlyList<TerrainVariant> GetAvailableVariants(int alternativeSectionCount) =>
+            OverworldVariants
+                .Where(variant => variant.AlternativeBlocks.All(block => block < BaseOverworldSectionCount + alternativeSectionCount))
+                .ToArray();
 
         internal sealed record TextureAnimationPreview(
             [property: JsonPropertyName("materialName")] string MaterialName,
@@ -1376,7 +1576,9 @@ namespace CrossSlash {
 
         public static ModelRoot BuildScene(DataSource source, string mapFile, int blockCount,
             CancellationToken cancellationToken, IProgress<BatchProgressUpdate>? progress,
-            List<TextureAnimationPreview>? previewAnimations = null) {
+            List<TextureAnimationPreview>? previewAnimations = null,
+            IReadOnlyCollection<TerrainVariant>? enabledVariants = null,
+            PreviewMode previewMode = PreviewMode.Textured) {
             string mapName = Path.GetFileNameWithoutExtension(mapFile).ToUpperInvariant();
             int mapId = mapName switch {
                 "WM0" => 0,
@@ -1387,6 +1589,13 @@ namespace CrossSlash {
             int sectionsAcross = mapId switch { 0 => 9, 2 => 3, 3 => 2, _ => 0 };
             int maxSections = mapId switch { 0 => 63, 2 => 12, 3 => 4, _ => 0 };
             int sectionsToExport = Math.Min(blockCount, maxSections);
+            var alternativeBlocksBySection = new Dictionary<int, int>();
+            if (mapId == 0 && enabledVariants != null) {
+                foreach (TerrainVariant variant in enabledVariants) {
+                    for (int index = 0; index < Math.Min(variant.BaseSections.Length, variant.AlternativeBlocks.Length); index++)
+                        alternativeBlocksBySection[variant.BaseSections[index]] = variant.AlternativeBlocks[index];
+                }
+            }
             var allFiles = source.AllFiles
                 .Select(file => Path.GetFileName(file))
                 .Where(file => !string.IsNullOrWhiteSpace(file))
@@ -1400,36 +1609,52 @@ namespace CrossSlash {
                     cancellationToken.ThrowIfCancellationRequested();
                     int blockX = block % sectionsAcross;
                     int blockZ = block / sectionsAcross;
-                    foreach (MapSector sector in map.ExportBlock(block)) {
+                    int sourceBlock = alternativeBlocksBySection.TryGetValue(block, out int alternativeBlock)
+                        ? alternativeBlock
+                        : block;
+                    foreach (MapSector sector in map.ExportBlock(sourceBlock)) {
                         foreach (MapTri triangle in sector.Triangles) {
                             if (triangle.Vert0 >= sector.Vertices.Count || triangle.Vert1 >= sector.Vertices.Count || triangle.Vert2 >= sector.Vertices.Count)
                                 continue;
 
                             string textureName;
+                            string meshKey;
+                            PreviewColor? previewColor = null;
                             Vector2 uv0, uv1, uv2;
-                            bool underwaterOutside = mapId == 2 && triangle.Texture == 0 && triangle.U0 == 254;
-                            if (underwaterOutside) {
-                                // Landscaper leaves these cltr triangles untextured; U=254 marks
-                                // the water outside the underwater map's normal textured area.
-                                textureName = "underwater-outside";
+                            if (previewMode == PreviewMode.Textured) {
+                                bool underwaterOutside = mapId == 2 && triangle.Texture == 0 && triangle.U0 == 254;
+                                if (underwaterOutside) {
+                                    // Landscaper leaves these cltr triangles untextured; U=254 marks
+                                    // the water outside the underwater map's normal textured area.
+                                    textureName = "underwater-outside";
+                                    uv0 = uv1 = uv2 = Vector2.Zero;
+                                } else try {
+                                    triangle.GetCorrectedTextureInfo(mapId, out textureName, out uv0, out uv1, out uv2);
+                                } catch {
+                                    textureName = $"missing-texture-{triangle.Texture}";
+                                    uv0 = new Vector2(triangle.U0 / 256f, triangle.V0 / 256f);
+                                    uv1 = new Vector2(triangle.U1 / 256f, triangle.V1 / 256f);
+                                    uv2 = new Vector2(triangle.U2 / 256f, triangle.V2 / 256f);
+                                }
+                                meshKey = textureName;
+                            } else {
+                                PreviewColor color = GetPreviewColor(previewMode, mapId, triangle);
+                                previewColor = color;
+                                textureName = color.Key;
+                                meshKey = color.Key;
                                 uv0 = uv1 = uv2 = Vector2.Zero;
-                            } else try {
-                                triangle.GetCorrectedTextureInfo(mapId, out textureName, out uv0, out uv1, out uv2);
-                            } catch {
-                                textureName = $"missing-texture-{triangle.Texture}";
-                                uv0 = new Vector2(triangle.U0 / 256f, triangle.V0 / 256f);
-                                uv1 = new Vector2(triangle.U1 / 256f, triangle.V1 / 256f);
-                                uv2 = new Vector2(triangle.U2 / 256f, triangle.V2 / 256f);
                             }
-                            if (!meshBuilders.TryGetValue(textureName, out var mesh)) {
-                                mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin>($"World terrain · {textureName}");
-                                meshBuilders.Add(textureName, mesh);
-                                materialBuilders[textureName] = CreateMaterial(source, textureName, allFiles, textureImages);
-                                if (mapId == 0 && previewAnimations != null && TryCreateTextureAnimationPreview(source, textureName, allFiles) is { } animation)
+                            if (!meshBuilders.TryGetValue(meshKey, out var mesh)) {
+                                mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin>($"World terrain · {meshKey}");
+                                meshBuilders.Add(meshKey, mesh);
+                                materialBuilders[meshKey] = previewColor == null
+                                    ? CreateMaterial(source, textureName, allFiles, textureImages)
+                                    : CreatePreviewMaterial(meshKey, previewColor.Value.Value);
+                                if (previewMode == PreviewMode.Textured && mapId == 0 && previewAnimations != null && TryCreateTextureAnimationPreview(source, textureName, allFiles) is { } animation)
                                     previewAnimations.Add(animation);
                             }
 
-                            var primitive = mesh.UsePrimitive(materialBuilders[textureName]);
+                            var primitive = mesh.UsePrimitive(materialBuilders[meshKey]);
                             MapVert v0 = sector.Vertices[triangle.Vert0];
                             MapVert v1 = sector.Vertices[triangle.Vert1];
                             MapVert v2 = sector.Vertices[triangle.Vert2];
@@ -1454,6 +1679,58 @@ namespace CrossSlash {
             model.Asset.Generator = "CrossSlash";
             return model;
         }
+
+        private static PreviewColor GetPreviewColor(PreviewMode mode, int mapId, MapTri triangle) {
+            if (mode == PreviewMode.Terrain) {
+                IReadOnlyDictionary<int, string> colors = mapId switch {
+                    0 => OverworldTerrainColors,
+                    2 => UnderwaterTerrainColors,
+                    3 => GlacierTerrainColors,
+                    _ => OverworldTerrainColors,
+                };
+                string hex = colors.TryGetValue(triangle.Walkmap, out string? terrainColor) ? terrainColor : "#444444";
+                return new PreviewColor($"Terrain type {triangle.Walkmap}", ParseSrgbColor(hex));
+            }
+            if (mode == PreviewMode.Region) {
+                IReadOnlyDictionary<int, string> colors = mapId switch {
+                    0 => OverworldRegionColors,
+                    2 => UnderwaterRegionColors,
+                    3 => GlacierRegionColors,
+                    _ => OverworldRegionColors,
+                };
+                int regionId = triangle.Location % 32;
+                string hex = colors.TryGetValue(regionId, out string? regionColor) ? regionColor : "#444444";
+                return new PreviewColor($"Region {regionId}", ParseSrgbColor(hex));
+            }
+
+            if (triangle.HasChocoboEncounters)
+                return new PreviewColor("Chocobo encounters", ParseSrgbColor("#ffff00"));
+            string scriptHex = triangle.Script == 0
+                ? "#6a6a6a"
+                : ScriptColors.TryGetValue(triangle.Script, out string? scriptColor) ? scriptColor : "#cc0000";
+            return new PreviewColor(triangle.Script == 0 ? "No script" : $"Script {triangle.Script}", ParseSrgbColor(scriptHex));
+        }
+
+        private static Vector4 ParseSrgbColor(string hex) {
+            string value = hex.TrimStart('#');
+            if (value.Length == 3)
+                value = string.Concat(value.Select(character => new string(character, 2)));
+            int red = int.Parse(value[..2], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            int green = int.Parse(value.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            int blue = int.Parse(value.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            static float ToLinear(int component) {
+                float srgb = component / 255f;
+                return srgb <= 0.04045f ? srgb / 12.92f : MathF.Pow((srgb + 0.055f) / 1.055f, 2.4f);
+            }
+            return new Vector4(ToLinear(red), ToLinear(green), ToLinear(blue), 1f);
+        }
+
+        private static MaterialBuilder CreatePreviewMaterial(string name, Vector4 color) =>
+            new MaterialBuilder($"World map view · {name}")
+                .WithUnlitShader()
+                .WithDoubleSide(true)
+                .WithAlpha(SharpGLTF.Materials.AlphaMode.OPAQUE)
+                .WithBaseColor(color);
 
         private static TextureAnimationPreview? TryCreateTextureAnimationPreview(DataSource source, string textureName,
             IReadOnlyDictionary<string, string> files) {

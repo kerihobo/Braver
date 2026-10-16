@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CrossSlash model preview</title>
-    <script type="module" crossorigin src="./assets/index-CPD1DFgL.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-uXRY2HhI.css">
+    <script type="module" crossorigin src="./assets/index-Bpx-IgKB.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DZ_LP0ea.css">
   </head>
   <body>
     <main id="viewer">
@@ -21,7 +21,39 @@
           <input id="field-location-wireframe-input" type="checkbox" checked />
           <span>Wireframe</span>
         </label>
+        <select id="terrain-view-mode" aria-label="Terrain view" title="View" hidden>
+          <option value="textured">Textured</option>
+          <option value="terrain">Terrain type</option>
+          <option value="region">Region</option>
+          <option value="scripts">Scripts</option>
+        </select>
+        <button id="terrain-help-button" type="button" aria-label="Terrain view help" aria-controls="terrain-help-overlay" aria-expanded="false" title="Explain terrain types, regions, and scripts" hidden>?</button>
         <button id="pop-out-button" type="button" aria-label="Pop out preview" title="Open preview in a resizable window">⤢</button>
+      </div>
+
+      <div id="terrain-help-overlay" hidden>
+        <section id="terrain-help-dialog" role="dialog" aria-modal="true" aria-labelledby="terrain-help-title" tabindex="-1">
+          <h2 id="terrain-help-title">World terrain view guide</h2>
+          <p id="terrain-help-map-note"></p>
+
+          <section class="terrain-help-section">
+            <h3>Terrain type</h3>
+            <p>Each triangle has a movement type. It affects where Cloud and vehicles can travel, and some types affect encounters or special behavior.</p>
+            <div id="terrain-type-guide" class="terrain-help-list"></div>
+          </section>
+
+          <section class="terrain-help-section">
+            <h3>Regions</h3>
+            <p>Region IDs mark world areas used for area behavior and encounter data. Gray means the current map has no color entry for that ID.</p>
+            <div id="terrain-region-guide" class="terrain-help-list"></div>
+          </section>
+
+          <section class="terrain-help-section">
+            <h3>Scripts</h3>
+            <p>Script values select behavior attached to a mesh triangle. Yellow triangles have the Chocobo encounter flag; this color takes priority over the script color.</p>
+            <div id="terrain-script-guide" class="terrain-help-list"></div>
+          </section>
+        </section>
       </div>
 
       <section id="controls" aria-label="Animation controls">
