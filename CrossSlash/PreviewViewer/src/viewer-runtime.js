@@ -41,9 +41,12 @@ let flyLastPointer = { x: 0, y: 0 };
 let flyYaw = 0;
 let flyPitch = 0;
 let flyMovementSpeed = 1;
+let flyMovementSpeedScale = 1;
 let flyPointerButton = -1;
 let flyLookMoved = false;
 let currentModel = null;
+let terrainTextureAnimations = [];
+let terrainTextureAnimationTimer = null;
 let currentModelName = '';
 let fieldCameraFit = null;
 let fieldViewState = null;
@@ -93,6 +96,11 @@ function disposeObject(root) {
 }
 
 function resetCurrentModel() {
+  if (terrainTextureAnimationTimer !== null) {
+    clearInterval(terrainTextureAnimationTimer);
+    terrainTextureAnimationTimer = null;
+  }
+  terrainTextureAnimations = [];
   if (mixer) mixer.stopAllAction();
   mixer = null;
   currentAction = null;
@@ -426,7 +434,7 @@ function fitCamera(root, zoomFactor = 1.2, cameraMode = 'orbit') {
     controls.maxDistance = largest * 30;
     controls.update();
   } else {
-    flyMovementSpeed = Math.max(largest * 0.25, 0.5);
+    flyMovementSpeed = Math.max(largest * 0.25, 0.5) * flyMovementSpeedScale;
     const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
     flyYaw = euler.y;
     flyPitch = euler.x;
@@ -728,8 +736,9 @@ function updateTimeLabel(time) {
   timeLabel.textContent = `${displayed.toFixed(2)} / ${duration.toFixed(2)} s`;
 }
 
-export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, cameraMode = 'orbit') {
+export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, cameraMode = 'orbit', previewData = null, movementSpeedScale = 1) {
   const sequence = ++loadSequence;
+  flyMovementSpeedScale = Number.isFinite(movementSpeedScale) && movementSpeedScale > 0 ? movementSpeedScale : 1;
   animationSequence++;
   isLoadingModel = true;
   pendingAnimation = null;
@@ -754,6 +763,7 @@ export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, camer
     if (activeLighting?.pointLights)
       applyFieldPointLighting(gltf.scene, activeLighting, true);
     scene.add(gltf.scene);
+    startTerrainTextureAnimations(gltf.scene, previewData?.textureAnimations, sequence);
     currentModelName = name;
     updateViewerLabels();
 
@@ -786,6 +796,84 @@ export function loadModel(base64, name, lighting = null, cameraZoom = 1.2, camer
     const detail = error?.message || 'The GLB could not be loaded.';
     setEmptyState(`Preview failed: ${detail}`);
     postToHost({ type: 'preview-error', message: detail });
+  });
+}
+
+function decodePreviewTexture(base64) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Could not decode an animated terrain texture frame.'));
+    image.src = `data:image/png;base64,${base64}`;
+    if (typeof image.decode === 'function')
+      image.decode().then(() => resolve(image), reject);
+  });
+}
+
+function applyTerrainTextureFrame(animation, frameIndex) {
+  const image = animation.images[frameIndex];
+  for (const material of animation.materials) {
+    if (!material.map) continue;
+    material.map.image = image;
+    material.map.needsUpdate = true;
+    material.needsUpdate = true;
+  }
+}
+
+function startTerrainTextureAnimations(root, definitions, sequence) {
+  if (!Array.isArray(definitions) || definitions.length === 0) return;
+
+  const animations = definitions.flatMap((definition) => {
+    if (!definition || typeof definition.materialName !== 'string' || !Array.isArray(definition.frames) || definition.frames.length < 2)
+      return [];
+    const materials = [];
+    root.traverse((object) => {
+      if (!object.material) return;
+      const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of objectMaterials) {
+        if (material.name === definition.materialName && material.map)
+          materials.push(material);
+      }
+    });
+    return materials.length > 0 ? [{ definition, materials }] : [];
+  });
+  if (animations.length === 0) return;
+
+  Promise.all(animations.map(async ({ definition, materials }) => {
+    try {
+      const images = await Promise.all(definition.frames.map(decodePreviewTexture));
+      if (sequence !== loadSequence || currentModel?.scene !== root) return null;
+      const animation = {
+        materials,
+        images,
+        intervalMs: Math.max(30, Number(definition.frameIntervalSeconds) * 1000 || 1000 / 3),
+        startedAt: performance.now(),
+        frameIndex: 0,
+      };
+      applyTerrainTextureFrame(animation, 0);
+      return animation;
+    } catch (error) {
+      console.warn(`Could not prepare animated terrain texture ${definition.materialName}:`, error);
+      return null;
+    }
+  })).then((loaded) => {
+    if (sequence !== loadSequence || currentModel?.scene !== root) return;
+    terrainTextureAnimations = loaded.filter(Boolean);
+    if (terrainTextureAnimations.length === 0) return;
+    const timerInterval = Math.max(30, Math.min(...terrainTextureAnimations.map((animation) => animation.intervalMs)));
+    terrainTextureAnimationTimer = setInterval(() => {
+      if (!viewerVisible) return;
+      const now = performance.now();
+      let changed = false;
+      for (const animation of terrainTextureAnimations) {
+        const frameIndex = Math.floor((now - animation.startedAt) / animation.intervalMs) % animation.images.length;
+        if (frameIndex === animation.frameIndex) continue;
+        animation.frameIndex = frameIndex;
+        applyTerrainTextureFrame(animation, frameIndex);
+        changed = true;
+      }
+      if (changed) scheduleFrame();
+    }, timerInterval);
   });
 }
 
@@ -1006,16 +1094,16 @@ function onFlyPointerUp(event) {
 function updateFlyControls(delta) {
   const forward = Number(flyKeys.has('KeyW')) - Number(flyKeys.has('KeyS'));
   const right = Number(flyKeys.has('KeyD')) - Number(flyKeys.has('KeyA'));
-  const vertical = (Number(flyKeys.has('KeyE')) - Number(flyKeys.has('KeyQ'))) * 0.35;
+  const vertical = Number(flyKeys.has('KeyE')) - Number(flyKeys.has('KeyQ'));
   if (forward === 0 && right === 0 && vertical === 0)
     return false;
 
-  const directionLength = Math.hypot(forward, right, vertical) || 1;
+  const horizontalLength = Math.hypot(forward, right) || 1;
   const fast = flyKeys.has('ShiftLeft') || flyKeys.has('ShiftRight') ? 3 : 1;
-  const distance = flyMovementSpeed * fast * delta / directionLength;
-  camera.translateZ(-forward * distance);
-  camera.translateX(right * distance);
-  camera.translateY(vertical * distance);
+  const distance = flyMovementSpeed * fast * delta;
+  camera.translateZ(-forward * distance / horizontalLength);
+  camera.translateX(right * distance / horizontalLength);
+  camera.position.y += vertical * distance * 0.35;
   return true;
 }
 

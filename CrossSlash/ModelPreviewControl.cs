@@ -69,7 +69,7 @@ namespace CrossSlash {
             Loaded += InitializeWebView;
         }
 
-        public void ShowModel(Func<ModelRoot> buildModel, string name, object? lighting = null, float cameraZoom = 1.2f, string cameraMode = "orbit", bool hideControls = false) {
+        public void ShowModel(Func<ModelRoot> buildModel, string name, object? lighting = null, float cameraZoom = 1.2f, string cameraMode = "orbit", bool hideControls = false, Func<object?>? getPreviewData = null, float flyMovementSpeedScale = 1.0f) {
             long request = Interlocked.Increment(ref _modelRequest);
             Interlocked.Increment(ref _animationRequest);
             _lastAnimationMessage = null;
@@ -78,7 +78,7 @@ namespace CrossSlash {
             _status.Text = $"Loading {name} preview…";
             _status.Visibility = Visibility.Visible;
             RequestViewerPreparation();
-            _ = PrepareModelPreviewAsync(buildModel, name, lighting, cameraZoom, cameraMode, hideControls, request);
+            _ = PrepareModelPreviewAsync(buildModel, name, lighting, cameraZoom, cameraMode, hideControls, getPreviewData, flyMovementSpeedScale, request);
         }
 
         private long _animationRequest;
@@ -186,15 +186,16 @@ namespace CrossSlash {
             SendPendingLightingMessage();
         }
 
-        private async Task PrepareModelPreviewAsync(Func<ModelRoot> buildModel, string name, object? lighting, float cameraZoom, string cameraMode, bool hideControls, long request) {
+        private async Task PrepareModelPreviewAsync(Func<ModelRoot> buildModel, string name, object? lighting, float cameraZoom, string cameraMode, bool hideControls, Func<object?>? getPreviewData, float flyMovementSpeedScale, long request) {
             await _buildGate.WaitAsync();
             try {
                 if (request != Interlocked.Read(ref _modelRequest))
                     return;
 
-                string glbBase64 = await Task.Run(() => {
+                var preview = await Task.Run(() => {
                     ModelRoot model = buildModel();
-                    return Convert.ToBase64String(model.WriteGLB().ToArray());
+                    string glbBase64 = Convert.ToBase64String(model.WriteGLB().ToArray());
+                    return (glbBase64, previewData: getPreviewData?.Invoke());
                 });
                 if (request != Interlocked.Read(ref _modelRequest))
                     return;
@@ -202,11 +203,13 @@ namespace CrossSlash {
                 string message = JsonSerializer.Serialize(new {
                     type = "load-model",
                     name,
-                    glbBase64,
+                    glbBase64 = preview.glbBase64,
                     lighting,
                     cameraZoom,
                     cameraMode,
                     hideControls,
+                    flyMovementSpeedScale,
+                    previewData = preview.previewData,
                 });
                 QueueViewerMessage(message);
             } catch (Exception ex) {

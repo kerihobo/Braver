@@ -190,7 +190,7 @@ window.chrome?.webview?.addEventListener('message', (event) => {
     prepareViewer().then((module) => {
       if (request === modelRequest)
       {
-        module.loadModel(message.glbBase64, message.name || 'Model preview', message.lighting || null, message.cameraZoom, message.cameraMode || 'orbit');
+        module.loadModel(message.glbBase64, message.name || 'Model preview', message.lighting || null, message.cameraZoom, message.cameraMode || 'orbit', message.previewData || null, message.flyMovementSpeedScale);
         module.setFieldLocationWireframe(fieldLocationWireframe);
       }
     }).catch(showLoadError);

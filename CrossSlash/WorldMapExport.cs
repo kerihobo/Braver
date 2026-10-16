@@ -16,6 +16,7 @@ using SharpGLTF.Scenes;
 using SharpGLTF.Transforms;
 using System.Globalization;
 using System.Numerics;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
@@ -931,10 +932,15 @@ namespace CrossSlash {
                 return;
             }
             DataSource source = _mapSource;
+            var textureAnimations = new List<WorldMapTerrainExporter.TextureAnimationPreview>();
             _terrainPreview.ShowModel(
-                () => WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, CancellationToken.None, null),
+                () => WorldMapTerrainExporter.BuildScene(source, map.FileName, map.BlockCount, CancellationToken.None, null, textureAnimations),
                 Path.GetFileNameWithoutExtension(map.FileName).ToUpperInvariant(),
-                cameraZoom: 1.0f);
+                cameraZoom: 4.0f,
+                cameraMode: "fly",
+                hideControls: true,
+                getPreviewData: () => new { textureAnimations },
+                flyMovementSpeedScale: 1.0f / 6.0f);
         }
 
         private async Task ExportSelectedTerrainAsync() {
@@ -1343,6 +1349,19 @@ namespace CrossSlash {
         public const int BlockByteLength = 0xB800;
         private const int BlockSize = 32768;
 
+        internal sealed record TextureAnimationPreview(
+            [property: JsonPropertyName("materialName")] string MaterialName,
+            [property: JsonPropertyName("frameIntervalSeconds")] double FrameIntervalSeconds,
+            [property: JsonPropertyName("frames")] string[] Frames);
+
+        private static readonly IReadOnlyDictionary<string, int> AnimatedTextureFrameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase) {
+            ["des01"] = 4, ["ds1"] = 4, ["ds_s1"] = 4, ["dsee1"] = 4, ["edes01"] = 4,
+            ["fall1"] = 8, ["lst1"] = 4, ["riv_l1"] = 4, ["rivs1"] = 4, ["rm1"] = 4,
+            ["sh_s1"] = 4, ["sh1"] = 4, ["shlm_1"] = 4, ["sse_s1"] = 4, ["ssee1"] = 4,
+            ["sst1"] = 4, ["swp1"] = 4, ["uf1"] = 4, ["wa1"] = 8, ["we_s1"] = 8,
+            ["we1"] = 8, ["wzs1"] = 8,
+        };
+
         private struct VertexNoSkin : IVertexSkinning {
             public int MaxBindings => 0;
             public Vector4 JointsLow => Vector4.Zero;
@@ -1356,7 +1375,8 @@ namespace CrossSlash {
         }
 
         public static ModelRoot BuildScene(DataSource source, string mapFile, int blockCount,
-            CancellationToken cancellationToken, IProgress<BatchProgressUpdate>? progress) {
+            CancellationToken cancellationToken, IProgress<BatchProgressUpdate>? progress,
+            List<TextureAnimationPreview>? previewAnimations = null) {
             string mapName = Path.GetFileNameWithoutExtension(mapFile).ToUpperInvariant();
             int mapId = mapName switch {
                 "WM0" => 0,
@@ -1405,6 +1425,8 @@ namespace CrossSlash {
                                 mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin>($"World terrain · {textureName}");
                                 meshBuilders.Add(textureName, mesh);
                                 materialBuilders[textureName] = CreateMaterial(source, textureName, allFiles, textureImages);
+                                if (mapId == 0 && previewAnimations != null && TryCreateTextureAnimationPreview(source, textureName, allFiles) is { } animation)
+                                    previewAnimations.Add(animation);
                             }
 
                             var primitive = mesh.UsePrimitive(materialBuilders[textureName]);
@@ -1431,6 +1453,36 @@ namespace CrossSlash {
             model.DefaultScene = model.LogicalScenes.FirstOrDefault() ?? model.UseScene($"FF7 World Map {mapName} Terrain");
             model.Asset.Generator = "CrossSlash";
             return model;
+        }
+
+        private static TextureAnimationPreview? TryCreateTextureAnimationPreview(DataSource source, string textureName,
+            IReadOnlyDictionary<string, string> files) {
+            if (!AnimatedTextureFrameCounts.TryGetValue(textureName, out int frameCount))
+                return null;
+
+            Match match = Regex.Match(textureName, @"^(.*?)(\d+)$");
+            if (!match.Success)
+                return null;
+            string prefix = match.Groups[1].Value;
+            string firstFrameNumber = match.Groups[2].Value;
+            int firstFrame = int.Parse(firstFrameNumber, CultureInfo.InvariantCulture);
+            var frames = new List<string>(frameCount);
+            try {
+                for (int frame = 0; frame < frameCount; frame++) {
+                    string frameName = prefix + (firstFrame + frame).ToString($"D{firstFrameNumber.Length}", CultureInfo.InvariantCulture) + ".tex";
+                    if (!files.TryGetValue(frameName, out string? resolved))
+                        return null;
+                    using Stream stream = source.Open(resolved);
+                    using var bitmap = new TexFile(stream).ToBitmap(0);
+                    using var encoded = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                    frames.Add(Convert.ToBase64String(encoded.ToArray()));
+                }
+            } catch {
+                // A missing or malformed frame leaves this material static in the preview.
+                return null;
+            }
+
+            return new TextureAnimationPreview($"World map · {textureName}", 10.0 / 30.0, frames.ToArray());
         }
 
         private static VertexBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin> MakeVertex(
