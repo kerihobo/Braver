@@ -31,9 +31,6 @@ namespace Ficedula.FF7.Exporters {
 
         public IReadOnlyList<string> FindCompatibleAnimations(string modelHRC, IEnumerable<string> animationFiles) {
             List<string> files = animationFiles.ToList();
-            if (TryFindMappedAnimations(modelHRC, files, out var mappedAnimations))
-                return mappedAnimations;
-
             int modelBoneCount;
             using (var hrc = _data.Open(modelHRC)) {
                 string[] lines = hrc.ReadAllLines().ToArray();
@@ -44,13 +41,14 @@ namespace Ficedula.FF7.Exporters {
         }
 
         private IReadOnlyList<string> FindCompatibleAnimations(string modelHRC, List<string> animationFiles, int modelBoneCount) {
-            if (TryFindMappedAnimations(modelHRC, animationFiles, out var mappedAnimations))
-                return mappedAnimations;
+            IReadOnlyList<string> candidates = TryFindMappedAnimations(modelHRC, animationFiles, out var mappedAnimations)
+                ? mappedAnimations
+                : animationFiles;
 
-            string animationList = string.Join("\0", animationFiles);
+            string animationList = string.Join("\0", candidates);
             return _compatibleAnimations.GetOrAdd(
                 (modelBoneCount, animationList),
-                key => animationFiles.Where(file => HasCompatibleSkeleton(file, key.BoneCount)).ToList()
+                key => candidates.Where(file => HasCompatibleSkeleton(file, key.BoneCount)).ToList()
             );
         }
 
