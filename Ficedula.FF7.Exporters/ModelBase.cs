@@ -7,6 +7,7 @@
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Geometry;
 using SharpGLTF.Materials;
+using SharpGLTF.Transforms;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,6 +34,18 @@ namespace Ficedula.FF7.Exporters {
         private Dictionary<(uint c0, uint c1, uint c2), (int x, int y)> _bakedColours = new();
         private SKBitmap _bakedTexture;
         private MaterialBuilder _bakedMaterial;
+
+        private struct VertexNoSkin : IVertexSkinning {
+            public int MaxBindings => 0;
+            public Vector4 JointsLow => Vector4.Zero;
+            public Vector4 JointsHigh => Vector4.Zero;
+            public Vector4 WeightsLow => Vector4.Zero;
+            public Vector4 WeightsHigh => Vector4.Zero;
+            public (int, float) GetBinding(int index) => (0, 0f);
+            public void SetBindings(in SparseWeight8 bindings) { }
+            public void SetBindings(params (int, float)[] bindings) { }
+            public SparseWeight8 GetBindings() => default;
+        }
 
         private static double SRGBToLinear(double value) {
             const double a = 0.055;
@@ -201,8 +214,14 @@ namespace Ficedula.FF7.Exporters {
             }
         }
 
-        protected IEnumerable<IMeshBuilder<MaterialBuilder>> BuildMeshes(PFile poly, 
-            IEnumerable<MaterialBuilder> materials, MaterialBuilder defMaterial, int boneIndex) {
+        protected IEnumerable<IMeshBuilder<MaterialBuilder>> BuildMeshes(PFile poly,
+            IEnumerable<MaterialBuilder> materials, MaterialBuilder defMaterial, int boneIndex, bool includeSkinning = true) {
+
+            if (!includeSkinning) {
+                foreach (var mesh in BuildRigidMeshes(poly, materials, defMaterial))
+                    yield return mesh;
+                yield break;
+            }
 
             SetupBaking();
 
@@ -291,6 +310,75 @@ namespace Ficedula.FF7.Exporters {
 
                         mesh.UsePrimitive(defMaterial)
                             .AddTriangle(vb0, vb1, vb2);
+                    }
+                    yield return mesh;
+                }
+            }
+        }
+
+        private IEnumerable<IMeshBuilder<MaterialBuilder>> BuildRigidMeshes(PFile poly,
+            IEnumerable<MaterialBuilder> materials, MaterialBuilder defMaterial) {
+
+            SetupBaking();
+
+            foreach (var group in poly.Chunks) {
+                if ((group.Texture != null) && (group.Texture.Value < materials.Count())) {
+                    var mesh = new MeshBuilder<VertexPositionNormal, VertexColor1Texture1, VertexNoSkin>();
+                    for (int i = 0; i < group.Indices.Count; i += 3) {
+                        var v0 = group.Verts[group.Indices[i]];
+                        var v1 = group.Verts[group.Indices[i + (_options.SwapWinding ? 2 : 1)]];
+                        var v2 = group.Verts[group.Indices[i + (_options.SwapWinding ? 1 : 2)]];
+                        (var n0, var n1, var n2) = GetTriangleNormals(v0, v1, v2);
+
+                        var vb0 = new VertexBuilder<VertexPositionNormal, VertexColor1Texture1, VertexNoSkin>(
+                            new VertexPositionNormal(v0.Position, n0),
+                            new VertexColor1Texture1(UnpackColour(v0.Colour), v0.TexCoord),
+                            new VertexNoSkin()
+                        );
+                        var vb1 = new VertexBuilder<VertexPositionNormal, VertexColor1Texture1, VertexNoSkin>(
+                            new VertexPositionNormal(v1.Position, n1),
+                            new VertexColor1Texture1(UnpackColour(v1.Colour), v1.TexCoord),
+                            new VertexNoSkin()
+                        );
+                        var vb2 = new VertexBuilder<VertexPositionNormal, VertexColor1Texture1, VertexNoSkin>(
+                            new VertexPositionNormal(v2.Position, n2),
+                            new VertexColor1Texture1(UnpackColour(v2.Colour), v2.TexCoord),
+                            new VertexNoSkin()
+                        );
+
+                        mesh.UsePrimitive(materials.ElementAt(group.Texture.Value))
+                            .AddTriangle(vb0, vb1, vb2);
+                    }
+                    yield return mesh;
+                } else if (_options.BakeVertexColours) {
+                    var mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin>();
+                    for (int i = 0; i < group.Indices.Count; i += 3) {
+                        var v0 = group.Verts[group.Indices[i]];
+                        var v1 = group.Verts[group.Indices[i + (_options.SwapWinding ? 2 : 1)]];
+                        var v2 = group.Verts[group.Indices[i + (_options.SwapWinding ? 1 : 2)]];
+                        (var n0, var n1, var n2) = GetTriangleNormals(v0, v1, v2);
+                        (var tc0, var tc1, var tc2) = GetBakedCoords(v0.Colour, v1.Colour, v2.Colour);
+
+                        var vb0 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin>(new VertexPositionNormal(v0.Position, n0), new VertexTexture1(tc0), new VertexNoSkin());
+                        var vb1 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin>(new VertexPositionNormal(v1.Position, n1), new VertexTexture1(tc1), new VertexNoSkin());
+                        var vb2 = new VertexBuilder<VertexPositionNormal, VertexTexture1, VertexNoSkin>(new VertexPositionNormal(v2.Position, n2), new VertexTexture1(tc2), new VertexNoSkin());
+
+                        mesh.UsePrimitive(_bakedMaterial).AddTriangle(vb0, vb1, vb2);
+                    }
+                    yield return mesh;
+                } else {
+                    var mesh = new MeshBuilder<VertexPositionNormal, VertexColor1, VertexNoSkin>();
+                    for (int i = 0; i < group.Indices.Count; i += 3) {
+                        var v0 = group.Verts[group.Indices[i]];
+                        var v1 = group.Verts[group.Indices[i + (_options.SwapWinding ? 2 : 1)]];
+                        var v2 = group.Verts[group.Indices[i + (_options.SwapWinding ? 1 : 2)]];
+                        (var n0, var n1, var n2) = GetTriangleNormals(v0, v1, v2);
+
+                        var vb0 = new VertexBuilder<VertexPositionNormal, VertexColor1, VertexNoSkin>(new VertexPositionNormal(v0.Position, n0), new VertexColor1(UnpackColour(v0.Colour)), new VertexNoSkin());
+                        var vb1 = new VertexBuilder<VertexPositionNormal, VertexColor1, VertexNoSkin>(new VertexPositionNormal(v1.Position, n1), new VertexColor1(UnpackColour(v1.Colour)), new VertexNoSkin());
+                        var vb2 = new VertexBuilder<VertexPositionNormal, VertexColor1, VertexNoSkin>(new VertexPositionNormal(v2.Position, n2), new VertexColor1(UnpackColour(v2.Colour)), new VertexNoSkin());
+
+                        mesh.UsePrimitive(defMaterial).AddTriangle(vb0, vb1, vb2);
                     }
                     yield return mesh;
                 }

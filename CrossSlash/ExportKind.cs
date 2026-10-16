@@ -25,6 +25,7 @@ namespace CrossSlash {
         public static readonly Dictionary<string, ExportKind> Exporters = new Dictionary<string, ExportKind>(StringComparer.InvariantCultureIgnoreCase) {
             ["FieldModel"] = new CrossSlash.FieldExport(),
             ["FieldLocation"] = new CrossSlash.FieldLocationExport(),
+            ["WorldMap"] = new CrossSlash.WorldMapExport(),
             ["BattleModel"] = new CrossSlash.BattleExport(),
             ["MagicModel"] = new CrossSlash.MagicExport(),
             ["LGP"] = new CrossSlash.LGP(),

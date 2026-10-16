@@ -18,7 +18,7 @@ namespace Ficedula.FF7.Exporters {
         private static readonly Lazy<IReadOnlyDictionary<string, HashSet<string>>> _fieldAnimationUsage =
             new(LoadFieldAnimationUsage);
         private DataSource _data;
-        private readonly ConcurrentDictionary<int, IReadOnlyList<string>> _compatibleAnimationsByBoneCount = new();
+        private readonly ConcurrentDictionary<(int BoneCount, string AnimationFiles), IReadOnlyList<string>> _compatibleAnimations = new();
 
         public FieldModel(DataSource data, ModelBaseOptions options) {
             _data = data;
@@ -38,8 +38,6 @@ namespace Ficedula.FF7.Exporters {
             using (var hrc = _data.Open(modelHRC)) {
                 string[] lines = hrc.ReadAllLines().ToArray();
                 modelBoneCount = int.Parse(lines[2].Split(null).Last());
-                if (modelBoneCount == 0)
-                    modelBoneCount = 1;
             }
 
             return FindCompatibleAnimations(modelHRC, files, modelBoneCount);
@@ -49,9 +47,10 @@ namespace Ficedula.FF7.Exporters {
             if (TryFindMappedAnimations(modelHRC, animationFiles, out var mappedAnimations))
                 return mappedAnimations;
 
-            return _compatibleAnimationsByBoneCount.GetOrAdd(
-                modelBoneCount,
-                count => animationFiles.Where(file => HasCompatibleSkeleton(file, count)).ToList()
+            string animationList = string.Join("\0", animationFiles);
+            return _compatibleAnimations.GetOrAdd(
+                (modelBoneCount, animationList),
+                key => animationFiles.Where(file => HasCompatibleSkeleton(file, key.BoneCount)).ToList()
             );
         }
 
@@ -91,12 +90,13 @@ namespace Ficedula.FF7.Exporters {
             bool includeMeshes = true,
             bool includeAnimations = true,
             int? maxAnimationCount = null,
-            bool useFirstAnimationFrameAsBindPose = false) {
+            bool useFirstAnimationFrameAsBindPose = false,
+            bool useSkinnedMeshes = true) {
             var scene = new SceneBuilder();
             var model = new Field.HRCModel(_data.Open, modelHRC);
             var animationFiles = animFiles.ToList();
             if (compatibleAnimationsOnly) {
-                animationFiles = FindCompatibleAnimations(modelHRC, animationFiles, model.Bones.Count).ToList();
+                animationFiles = FindCompatibleAnimations(modelHRC, animationFiles).ToList();
             }
             if (maxAnimationCount.HasValue)
                 animationFiles = animationFiles.Take(Math.Max(0, maxAnimationCount.Value)).ToList();
@@ -126,6 +126,8 @@ namespace Ficedula.FF7.Exporters {
             void Descend(SceneBuilder scene, HRCModel.Bone bone, NodeBuilder node, Vector3 translation, Vector3? scale) {
                 sourceNodes[bone.Name] = bone;
                 Vector3 rotationDegrees = Vector3.Zero;
+                if (useFirstAnimationFrameAsBindPose && firstFrame == null && bone.Index < 0)
+                    rotationDegrees = new Vector3(-180, 0, 0);
                 if (firstFrame != null) {
                     if (bone.Index < 0) {
                         rotationDegrees = new Vector3(
@@ -171,6 +173,15 @@ namespace Ficedula.FF7.Exporters {
                 }
             }
 
+            void DescendRigidMesh(SceneBuilder scene, HRCModel.Bone bone, NodeBuilder node) {
+                foreach (var poly in bone.Polygons) {
+                    foreach (var mesh in BuildMeshes(poly.PFile, poly.Textures.Select(tex => materials[tex]), defMaterial, bone.Index, includeSkinning: false))
+                        scene.AddRigidMesh(mesh, node);
+                }
+                foreach (var child in bone.Children)
+                    DescendRigidMesh(scene, child, allNodes[child.Name]);
+            }
+
             var rootContainer = new NodeBuilder("RootContainer");
             rootContainer.LocalTransform = SharpGLTF.Transforms.AffineTransform.CreateFromAny(
                 null,
@@ -181,14 +192,18 @@ namespace Ficedula.FF7.Exporters {
             var root = rootContainer.CreateNode("root");
             Descend(scene, model.Root, root, Vector3.Zero, null);
             if (includeMeshes) {
-                DescendMesh(
-                    scene, model.Root, root, root.LocalMatrix,
-                    sourceNodes.Values
-                    .Where(bone => bone.Index >= 0)
-                    .OrderBy(bone => bone.Index)
-                    .Select(bone => allNodes[bone.Name])
-                    .ToArray()
-                );
+                if (useSkinnedMeshes) {
+                    DescendMesh(
+                        scene, model.Root, root, root.LocalMatrix,
+                        sourceNodes.Values
+                        .Where(bone => bone.Index >= 0)
+                        .OrderBy(bone => bone.Index)
+                        .Select(bone => allNodes[bone.Name])
+                        .ToArray()
+                    );
+                } else {
+                    DescendRigidMesh(scene, model.Root, root);
+                }
             }
             scene.AddNode(rootContainer);
 

@@ -44,6 +44,35 @@ namespace Ficedula.FF7.WorldMap {
             uv2 = new Vector2((U2 - tex.UOffset) * 1f / tex.Width, (V2 - tex.VOffset) * 1f / tex.Height);
         }
 
+        public void GetCorrectedTextureInfo(int mapId, out string texFile, out Vector2 uv0, out Vector2 uv1, out Vector2 uv2) {
+            TexMap[] textureMap = mapId switch {
+                0 => _texMap,
+                2 => _underwaterTexMap,
+                3 => _glacierTexMap,
+                _ => throw new ArgumentOutOfRangeException(nameof(mapId), "Supported world maps are WM0, WM2 and WM3."),
+            };
+            if (Texture < 0 || Texture >= textureMap.Length)
+                throw new ArgumentOutOfRangeException(nameof(Texture), $"Texture index {Texture} is not valid for WM{mapId}.");
+
+            TexMap tex = textureMap[Texture];
+            texFile = tex.Filename;
+            uv0 = GetMapUv(U0, V0, tex);
+            uv1 = GetMapUv(U1, V1, tex);
+            uv2 = GetMapUv(U2, V2, tex);
+        }
+
+        private static Vector2 GetMapUv(byte u, byte v, TexMap texture) => new(
+            GetMapUvCoordinate(u, texture.UOffset, texture.Width),
+            GetMapUvCoordinate(v, texture.VOffset, texture.Height));
+
+        private static float GetMapUvCoordinate(int value, int offset, int dimension) {
+            if (value + offset == dimension)
+                return (value - 1f) / dimension;
+            if (offset > value)
+                offset %= dimension;
+            return Math.Abs((value - offset) % dimension) / (float)dimension;
+        }
+
         public static IEnumerable<string> TexFiles => _texMap.Select(t => t.Filename);
 
         private class TexMap {
@@ -343,6 +372,24 @@ namespace Ficedula.FF7.WorldMap {
                  new TexMap("wood_d",    64,     64,     192,    160),
                  new TexMap("wtrk",  32,     64,     64,     96)
             };
+
+        private static readonly TexMap[] _underwaterTexMap = {
+            new TexMap("cltr", 128, 128, 0, 0),
+            new TexMap("lake_a", 128, 256, 0, 0),
+            new TexMap("rock", 256, 256, 0, 0),
+            new TexMap("scave", 256, 256, 0, 0),
+            new TexMap("ssand", 256, 256, 0, 0),
+            new TexMap("swall02", 256, 256, 0, 0),
+            new TexMap("sng01", 128, 128, 128, 0),
+            new TexMap("sng02", 128, 128, 128, 0),
+        };
+
+        private static readonly TexMap[] _glacierTexMap = {
+            new TexMap("hokola01", 64, 64, 0, 0),
+            new TexMap("hokola02", 64, 64, 0, 128),
+            new TexMap("snwfldl", 64, 64, 0, 32),
+            new TexMap("snwfld2", 64, 64, 0, 192),
+        };
 
     }
 

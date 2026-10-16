@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 namespace Ficedula.FF7.Exporters {
 
     public abstract class DataSource {
+        public virtual string? SourcePath => null;
         public abstract bool Exists(string name);
         public abstract Stream Open(string name);
         public abstract IEnumerable<string> AllFiles { get; }
@@ -27,6 +28,7 @@ namespace Ficedula.FF7.Exporters {
         private class FileDataSource : DataSource {
             private string _root;
 
+            public override string SourcePath => _root;
             public override IEnumerable<string> AllFiles => Directory.GetFiles(_root)
                 .Select(fn => fn.Substring(_root.Length).TrimStart(Path.DirectorySeparatorChar));
 
@@ -41,9 +43,11 @@ namespace Ficedula.FF7.Exporters {
         private class LGPDataSource : DataSource, IDisposable {
             private LGPFile _lgp;
 
+            public override string SourcePath { get; }
             public override IEnumerable<string> AllFiles => _lgp.Filenames;
 
             public LGPDataSource(string file) {
+                SourcePath = Path.GetFullPath(file);
                 _lgp = new LGPFile(File.OpenRead(file));
             }
 
